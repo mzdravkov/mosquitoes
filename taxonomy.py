@@ -1,39 +1,46 @@
 from ncbi.datasets.openapi import ApiClient
 from ncbi.datasets.openapi.api.taxonomy_api import TaxonomyApi
+from ncbi.datasets import GenomeApi
 
-def get_taxonomy_leafs(taxonomy_response):
+
+TAXON_RANKS_UNDER_SPECIES = {
+    'SPECIES',
+    'SUBSPECIES',
+    'FORMA',
+    'VARIETAS',
+    'STRAIN',
+    'SUBVARIETY'
+}
+
+
+def filter_species_and_subranks(taxonomy_response):
     """
-    get_taxonomy_leafs will read the response from taxonomy API taxonomy_filtered_subtree
-    and extract a set of the taxonomy ids of the subtree leafs (species).
+    filter_species_and_subranks will read the response from taxonomy API genome_tax_tree
+    and extract information about the species (and other ranks under species) in the subtree.
     """
-    edges = taxonomy_response['edges']
-    queue = []
-    # Add the root ('1') to start traversing the tree
-    queue.append('1')
+    # Add the root node
+    queue = [taxonomy_response]
     leafs = set()
     while len(queue) > 0:
         node = queue.pop()
-        children = edges[node].get('visible_children')
-        if not children:
-            leafs.add(node)
-            continue
-        for child in children:
-            queue.append(str(child))
+        if node['rank'].to_str() in TAXON_RANKS_UNDER_SPECIES:
+            leaf = (node['tax_id'], node['title'], node['rank'].to_str())
+            leafs.add(leaf)
+        children = node.get('children')
+        if children:
+            for child in children:
+                queue.append(child)
     return leafs
 
 
-def get_species_under_taxon_subtree(taxon):
+def get_species_in_taxon_subtree(taxon):
     """
-    get_species_under_taxon_subtree gets a taxon identifier (as string), e.g. '7157' and returns
-    a set with the taxonomy identifiers of its subtree leafs (i.e. species under the taxon).
+    get_species_in_taxon_subtree gets a taxon identifier (as string), e.g. '7157' and returns
+    a list of the species (and other ranks below species) in the subtree under the given taxon.
     Example:
-    get_species_under_taxon_subtree('7157') will return a list of all species in the Culicidae family.
+    get_species_in_taxon_subtree('7157') will return a list of all species in the Culicidae family.
+    Return value type: [(taxon_id, taxon_name, taxon_rank), ...]
     """
-    with ApiClient() as api_client:
-        taxonomy_client = TaxonomyApi(api_client)
-        try:
-            response = taxonomy_client.taxonomy_filtered_subtree([taxon])
-            print(response)
-            return get_taxonomy_leafs(response)
-        except Exception as e:
-            print(f"Exception when calling TaxonomyApi: {e}")
+    genome_client = GenomeApi()
+    response = genome_client.genome_tax_tree(taxon)
+    return filter_species_and_subranks(response)

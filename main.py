@@ -5,27 +5,34 @@ from multiprocessing import Pool
 # from ncbi.datasets.openapi import ApiClient as DatasetsApiClient
 # from ncbi.datasets.openapi import ApiException as DatasetsApiException
 from ncbi.datasets import GenomeApi
+from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
 
 # from ncbi.datasets.package import dataset
 
 import tempfile
 
-from taxonomy import get_species_under_taxon_subtree
+from taxonomy import get_species_in_taxon_subtree
 
 
 def genome_assembly_metadata_fetch_has_error(response):
-    if 'assemblies' in response:
-        return False
-    errors = (msg for msg in response['messages'] if 'error' in msg)
-    for err in errors:
-        return err['error']
+    """
+    Returns the error found in the response or False if there's no error.
+    """
+    if 'assemblies' not in response:
+        errors = (msg for msg in response['messages'] if 'error' in msg)
+        for err in errors:
+            return err['error']
     return False
 
 
 def get_accessions(taxons):
+    """
+    Takes an iterable of specie taxon ids and returns a list of the
+    accession ids of their genome assemblies.
+    """
     genome_client = GenomeApi()
     accessions = []
-    for taxon in taxons:
+    for taxon, taxon_name, taxon_rank in taxons:
         descriptors = genome_client.assembly_descriptors_by_taxon(taxon)
         # print(descriptors)
         err = genome_assembly_metadata_fetch_has_error(descriptors)
@@ -44,11 +51,11 @@ def get_accessions(taxons):
                 print('Taxon {} ({}) has assembly {}'.format(organism['tax_id'], organism['organism_name'], accession))
     return accessions
 
-specie_taxons = get_species_under_taxon_subtree('7157')
+specie_taxons = get_species_in_taxon_subtree('7157')
 print(specie_taxons)
 print('Got {} taxons'.format(len(specie_taxons)))
 
-# accessions = get_accessions(specie_taxons)
+accessions = get_accessions(specie_taxons)
 
 
 # zipfile_name = "gene_ds.zip"
@@ -116,6 +123,12 @@ proteins = [
 
 
 def get_gene_correspondance_table(specie1, specie2):
+    """
+    Takes the acession ids of two species and returns a
+    gene correspondance table and an average identity score.
+    The correspondance table contains records of the following type:
+    (protein_id, matched_protein_id, identity_score)
+    """
     correspondances = []
     specie1_prot_fasta = specie1 + '.faa'
     with open(specie1_prot_fasta) as handle:
@@ -127,8 +140,12 @@ def get_gene_correspondance_table(specie1, specie2):
             results = p.map(blast_protein, proteins)
         for id, matched_id, identity in results:
             correspondances.append((id, matched_id, identity))
-            print(id, matched_id, identity)
     avg_identity = sum(float(c[2]) for c in correspondances)/len(correspondances)
-    print(avg_identity)
+    return correspondances, avg_identity
 
-get_gene_correspondance_table(proteins[0], proteins[1])
+protein_correspondances, avg_identity = get_gene_correspondance_table(proteins[0], proteins[1])
+
+for pc in protein_correspondances:
+    print(*pc)
+
+print(avg_identity)
