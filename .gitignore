@@ -137,3 +137,6 @@ dmypy.json
 *.faa.pin
 *.faa.psq
 *.faa.phr
+
+data/**/*.csv
+data/**/*.zip
