@@ -6,8 +6,8 @@ import logging
 from genomes import get_accessions
 from processing import download_data_for_genomes
 from processing import get_genome_pairs_for_processing
-from proteins import get_protein_correspondance_table
-from storage import get_genome_pair_filename, save_protein_correspondances
+from proteins import get_protein_correspondence_table
+from storage import get_genome_pair_filename, save_protein_correspondences
 from taxonomy import get_species_in_taxon_subtree
 
 
@@ -47,18 +47,27 @@ genome_pairs = get_genome_pairs_for_processing(proteins)
 print(genome_pairs)
 
 for specie1, specie2 in genome_pairs:
-    logging.info('Starting to build a correspondance table between {}-{}'.format(specie1, specie2))
-    correspondances, avg_identity = get_protein_correspondance_table(specie1, specie2)
+    logging.info('Starting to build a correspondence table between {}-{}'.format(specie1, specie2))
+    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
     filename = get_genome_pair_filename(specie1, specie2)
-    save_protein_correspondances(correspondances, filename)
+    save_protein_correspondences(correspondences, filename)
     print('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
     logging.info('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
 
-# protein_correspondances, avg_identity = get_protein_correspondance_table(proteins[0], proteins[2])
 
-# for pc in protein_correspondances:
+# scores = []
+# for i in range(10):
+#     correspondences, avg_identity = get_protein_correspondence_table(proteins[1], proteins[0], subset=100)
+#     scores.append(avg_identity)
+#     print('Average identity score for {}-{}: {}'.format(proteins[1], proteins[0], avg_identity))
+# print("TOTAL average = ", sum(scores) / len(scores))
+
+
+# protein_correspondences, avg_identity = get_protein_correspondence_table(proteins[0], proteins[2])
+
+# for pc in protein_correspondences:
 #     print(*pc)
 
-# save_protein_correspondances(protein_correspondances, proteins[0] + '-' + proteins[2] + '.csv')
+# save_protein_correspondences(protein_correspondences, proteins[0] + '-' + proteins[2] + '.csv')
     
 # print('Average identity score: {}'.format(avg_identity))

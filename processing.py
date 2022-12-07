@@ -2,7 +2,7 @@ import logging
 import os
 
 from proteins import download_dataset
-from storage import CORRESPONDANCES_DIR, SEQUENCES_DIR
+from storage import CORRESPONDENCES_DIR, SEQUENCES_DIR
 
 
 def __get_genome_combinations(genomes):
@@ -18,7 +18,7 @@ def get_genome_pairs_for_processing(genomes):
     Returns a list of genome pairs that are not yet processed.
     """
     processed_genome_pairs = set()
-    for filename in os.listdir(CORRESPONDANCES_DIR):
+    for filename in os.listdir(CORRESPONDENCES_DIR):
         if filename.endswith('.csv'):
             genome1, genome2 = filename.split('-')
             processed_genome_pairs.add((genome1, genome2))
