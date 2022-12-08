@@ -1,5 +1,5 @@
-# mosquitos
-A playground to test some research ideas for defeating mosquitos.
+# mosquitoes
+A playground to test some research ideas for defeating mosquitoes.
 
 
 ## Prerequisites:
