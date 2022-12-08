@@ -1,10 +1,10 @@
-from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
-
 import argparse
 import logging
 
+from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
+
 from genomes import get_accessions
-from processing import download_data_for_genomes
+from processing import download_data_for_genomes, get_correspondence_tables_in_parallel
 from processing import get_genome_pairs_for_processing
 from proteins import get_protein_correspondence_table
 from storage import get_genome_pair_filename, save_protein_correspondences
@@ -43,16 +43,14 @@ proteins = [
 
 # genome_pairs = get_genome_pairs_for_processing(accessions)
 genome_pairs = get_genome_pairs_for_processing(proteins)
-
 print(genome_pairs)
 
-for specie1, specie2 in genome_pairs:
-    logging.info('Starting to build a correspondence table between {}-{}'.format(specie1, specie2))
-    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
-    filename = get_genome_pair_filename(specie1, specie2)
-    save_protein_correspondences(correspondences, filename)
-    print('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
-    logging.info('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
+get_correspondence_tables_in_parallel(genome_pairs)
+
+
+# for specie1, specie2 in genome_pairs:
+#     logging.info('Starting to build a correspondence table between {}-{}'.format(specie1, specie2))
+#     correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
 
 
 # scores = []

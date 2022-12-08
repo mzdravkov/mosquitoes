@@ -1,8 +1,9 @@
 import logging
+import os
+import random
 import subprocess
 import sys
 import tempfile
-import random
 
 from multiprocessing import Pool
 from os.path import join
@@ -147,17 +148,19 @@ def blat_proteins(specie1, specie2, reverse=False):
     with open(result_file) as f:
         parser = BlatPslParser(f)
         correspondences = {}
-        total_sum = 0
         for match in parser:
             ordered_hits = sorted(match.hsps, key=lambda hsp: hsp.ident_pct, reverse=True)
             best_match = None
             if len(ordered_hits) > 0:
                 best_match = ordered_hits[0]
-                # correspondences.append((best_match.query_id, best_match.hit_id, best_match.ident_pct))
                 key = (best_match.query_id, best_match.hit_id)
                 if reverse:
                     key = (best_match.hit_id, best_match.query_id)
                 correspondences[key] = best_match.ident_pct
+
+    # Delete the psl file
+    os.remove(result_file)       
+
     return correspondences 
 
 
@@ -191,24 +194,18 @@ def get_protein_correspondence_table(specie1, specie2):
     correspondences_forw = blat_proteins(specie1, specie2)
     # Search specie2 proteins in specie1's proteome
     correspondences_back = blat_proteins(specie2, specie1, reverse=True)
-    
+
     correspondences = []
-    
     total_sum = 0
     # Merge the two results into a single table
     all_pairs = set(correspondences_forw.keys()).union(correspondences_back.keys())
     for pair in all_pairs:
+        identity = correspondences_forw.get(pair, correspondences_back.get(pair))
         if pair in correspondences_forw and pair in correspondences_back:
             # Should be the same in both places, but just in case
             identity = (correspondences_forw[pair] + correspondences_back[pair])/2
-            correspondences.append((pair[0], pair[1], identity))
-            total_sum += identity
-        elif pair in correspondences_back:
-            correspondences.append((pair[1], pair[0], correspondences_back[pair]))
-            total_sum += correspondences_back[pair]
-        else:
-            correspondences.append((pair[0], pair[1], correspondences_forw[pair]))
-            total_sum += correspondences_forw[pair]
+        correspondences.append((pair[0], pair[1], identity))
+        total_sum += identity
             
     # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
     # add them to the table with a score of 0.
