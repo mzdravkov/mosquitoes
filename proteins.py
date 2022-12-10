@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,7 @@ from ncbi.datasets.package import dataset
 from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
 from ncbi.datasets.openapi.model.v1_annotation_for_assembly_type import V1AnnotationForAssemblyType
 
-from storage import SEQUENCES_DIR
+from storage import SEQUENCES_DIR, get_protein_filename
 from storage import get_dataset_filename
 
 
@@ -101,7 +102,7 @@ def get_protein_correspondence_table_batched_blast(specie1, specie2, processes=1
     (protein_id, matched_protein_id, identity_score)
     """
     specie1_prot_fasta = specie1 + '.faa'
-    
+
     part_files = [tempfile.NamedTemporaryFile() for i in range(processes)]
 
     try:
@@ -114,7 +115,7 @@ def get_protein_correspondence_table_batched_blast(specie1, specie2, processes=1
                 i += 1
                 if i == processes:
                     i = 0
-        
+
         for file in part_files:
             file.flush()
 
@@ -135,9 +136,9 @@ def get_protein_correspondence_table_batched_blast(specie1, specie2, processes=1
 
 
 def blat_proteins(specie1, specie2, reverse=False):
-    specie1_file = specie1 + '.faa'
-    specie2_file = specie2 + '.faa'
-    
+    specie1_file = get_protein_filename(specie1)
+    specie2_file = get_protein_filename(specie2)
+
     result_file = specie1 + '_' + specie2 + '.psl'
 
     # execute blat as a subprocess
@@ -159,9 +160,9 @@ def blat_proteins(specie1, specie2, reverse=False):
                 correspondences[key] = best_match.ident_pct
 
     # Delete the psl file
-    os.remove(result_file)       
+    os.remove(result_file)
 
-    return correspondences 
+    return correspondences
 
 
 def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
@@ -169,14 +170,14 @@ def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
     Adds proteins that are not already present in the correspondences table.
     """
     all_specie1_proteins = {row[0] for row in correspondences}
-    with open(specie1 + '.faa') as handle:
+    with open(get_protein_filename(specie1)) as handle:
         for header, _ in SimpleFastaParser(handle):
             id = header.split(' ')[0]
             if id not in all_specie1_proteins:
                 correspondences.append((id, None, 0))
 
     all_specie2_proteins = {row[1] for row in correspondences}
-    with open(specie2 + '.faa') as handle:
+    with open(get_protein_filename(specie2)) as handle:
         for header, _ in SimpleFastaParser(handle):
             id = header.split(' ')[0]
             if id not in all_specie2_proteins:
@@ -206,13 +207,13 @@ def get_protein_correspondence_table(specie1, specie2):
             identity = (correspondences_forw[pair] + correspondences_back[pair])/2
         correspondences.append((pair[0], pair[1], identity))
         total_sum += identity
-            
+
     # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
     # add them to the table with a score of 0.
     add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
-            
+
     avg_identity = total_sum/len(correspondences)
-    
+
     return correspondences, avg_identity
 
 
@@ -221,11 +222,10 @@ def download_dataset(accession):
     Downloads the protein fasta file for the genome assembly with the given accession number.
     """
     zipfile_name = get_dataset_filename(accession)
-    
+
     # Check if zipfile_name already exists, skipping the download if it does.
     try:
         with open(zipfile_name, 'r') as f:
-            print('exists')
             logging.info('File %s already exists. Skipping.', zipfile_name)
             return
     except FileNotFoundError:
@@ -260,3 +260,47 @@ def get_protein_from_dataset(accession):
 
     # TODO: check why we can have more than one file and what to do with it
     return package.get_files_by_type("PROTEIN_FASTA")[0]
+
+
+def extract_protein_data(accession):
+    """
+    Checks if the archive with data for a genome is already
+    downloaded and contains protein data. If it does, it will
+    extract the archive and return the path to the protein file.
+    """
+    protein_target_filepath = get_protein_filename(accession)
+
+    # If the data is already extracted, do nothing
+    if os.path.isdir(protein_target_filepath):
+        return
+
+    # If the data is not downloaded, do nothing
+    zipfile = get_dataset_filename(accession)
+    if not os.path.isfile(zipfile):
+        return
+
+    # Don't extract if there is no protein data
+    package = dataset.GeneDataset(zipfile)
+    protein_files = package.get_file_names_by_type("PROTEIN_FASTA")
+    if len(protein_files) == 0:
+        return
+
+    tmp_dir = join(SEQUENCES_DIR, 'tmp')
+
+    shutil.unpack_archive(zipfile, tmp_dir, format='zip')
+
+    # move the extracted data to the sequence directory
+    src = join(tmp_dir, 'ncbi_dataset', 'data', accession, 'protein.faa')
+    dest = join(SEQUENCES_DIR, accession + '.faa')
+    shutil.move(src, dest)
+
+    # clean up the directory left from extracting the protein data
+    shutil.rmtree(tmp_dir)
+
+
+def has_protein_data(accession):
+    """
+    Checks if the protein fasta file for the given accession is available.
+    """
+    prot_fasta = get_protein_filename(accession)
+    return os.path.isfile(prot_fasta)

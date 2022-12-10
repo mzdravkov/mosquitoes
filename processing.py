@@ -49,6 +49,7 @@ def __get_protein_correspondence_table_wrapper(args):
     correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
     return (specie1, specie2), correspondences, avg_identity
 
+
 def get_correspondence_tables_in_parallel(genome_pairs):
     """
     Returns a list of correspondence tables for the given genome pairs.

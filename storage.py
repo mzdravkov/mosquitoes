@@ -1,10 +1,14 @@
 import csv
+
 from os.path import join
+
+from ncbi.datasets.package import dataset
 
 
 DATA_DIR = 'data'
 CORRESPONDENCES_DIR = join(DATA_DIR, 'correspondences')
 SEQUENCES_DIR = join(DATA_DIR, 'sequences')
+DOWNLOADED_DATA_DIR = join(SEQUENCES_DIR, 'downloads')
 
 
 def read_protein_correspondences(filename):
@@ -35,4 +39,8 @@ def get_genome_pair_filename(genome1, genome2):
 
 
 def get_dataset_filename(accession):
-    return join(SEQUENCES_DIR, accession + '.faa.zip')
+    return join(DOWNLOADED_DATA_DIR, accession + '.faa.zip')
+
+
+def get_protein_filename(accession):
+    return join(SEQUENCES_DIR, accession + '.faa')
