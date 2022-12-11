@@ -109,7 +109,7 @@ def align(args):
     #     ]
     # genome_pairs = get_genome_pairs_for_processing(proteins)
 
-    genome_pairs = get_genome_pairs_for_processing(accessions)
+    genome_pairs = get_genome_pairs_for_processing(prot_assemblies)
 
     logging.info('Got {} genome pairs for processing'.format(len(genome_pairs)))
     print('Got {} genome pairs for processing'.format(len(genome_pairs)))
