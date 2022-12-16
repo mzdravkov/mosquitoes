@@ -26,7 +26,7 @@ def get_genome_pairs_for_processing(genomes):
     processed_genome_pairs = set()
     for filename in os.listdir(CORRESPONDENCES_DIR):
         if filename.endswith('.csv'):
-            genome1, genome2 = filename.split('-')
+            genome1, genome2 = filename.rstrip('.csv').split('-')
             processed_genome_pairs.add((genome1, genome2))
     # sort each pair to match the filename format
     genome_combinations = (tuple(sorted(pair)) for pair in __get_genome_combinations(genomes))

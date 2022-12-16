@@ -163,7 +163,8 @@ def blat_proteins(specie1, specie2, reverse=False):
                 correspondences[key] = best_match.ident_pct
 
     # Delete the psl file
-    os.remove(results_file)
+    if os.path.exists(results_file):
+        os.remove(results_file)
 
     return correspondences
 

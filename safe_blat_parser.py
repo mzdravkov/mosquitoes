@@ -40,7 +40,7 @@ class SafeBlatParser(BlatPslParser):
                 except ValueError as e:
                     logging.warning("Value error in parsing BLAT result in file %s, row '%s'., (%s)",
                                     self.handle.name, self.line, e)
-                    continue
+                    break
                 cur_qid = cur["qname"]
                 cur_hid = cur["tname"]
             else:
