@@ -1,4 +1,4 @@
-biopython>=1.79
+biopython>=1.80
 wheel>=0.38.2
 ncbi-datasets-pylib>=14.2.2
 prettytable

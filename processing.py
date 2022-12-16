@@ -47,10 +47,13 @@ def download_data_for_genomes(genomes):
             download_dataset(genome)
             
             
-def __get_protein_correspondence_table_wrapper(args):
+def create_correspondance_table(args):
     specie1, specie2 = args
     correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
-    return (specie1, specie2), correspondences, avg_identity
+    filename = get_genome_pair_filename(specie1, specie2)
+    save_protein_correspondences(correspondences, filename)
+    print('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity), flush=True)
+    logging.info('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
 
 
 def create_correspondence_tables_in_parallel(genome_pairs):
@@ -59,13 +62,7 @@ def create_correspondence_tables_in_parallel(genome_pairs):
     genome pairs and saves them to the file system.
     """
     with Pool() as p:
-        results = p.map(__get_protein_correspondence_table_wrapper, genome_pairs)
-    
-    for (specie1, specie2), correspondences, avg_identity in results:
-        filename = get_genome_pair_filename(specie1, specie2)
-        save_protein_correspondences(correspondences, filename)
-        print('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
-        logging.info('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
+        p.map(create_correspondance_table, genome_pairs)
         
 
 def align(args):
@@ -103,9 +100,11 @@ def align(args):
     logging.info('Got {} accessions with protein data in their assembly'.format(len(prot_assemblies)))
 
     # proteins = [
-    #     'GCF_000005575.2', # Anopheles gambiae
-    #     'GCF_016920715.1', # Anopheles arabiensis
-    #     'GCF_016801865.1' # Culex pipiens pallens
+    #     # 'GCF_000005575.2', # Anopheles gambiae
+    #     # 'GCF_016920715.1', # Anopheles arabiensis
+    #     # 'GCF_016801865.1' # Culex pipiens pallens
+    #     # 'GCF_943734845.2',
+    #     # 'GCF_013141755.1'
     #     ]
     # genome_pairs = get_genome_pairs_for_processing(proteins)
 

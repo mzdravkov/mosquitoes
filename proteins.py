@@ -5,12 +5,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from multiprocessing import Pool
 from os.path import join
 
 from Bio.Blast.Applications import NcbiblastpCommandline
-from Bio.SearchIO.BlatIO import BlatPslParser
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from ncbi.datasets import GenomeApi
 from ncbi.datasets.openapi import ApiClient as DatasetsApiClient
@@ -22,7 +22,7 @@ from ncbi.datasets.openapi.model.v1_annotation_for_assembly_type import V1Annota
 
 from storage import SEQUENCES_DIR, get_protein_filename
 from storage import get_dataset_filename
-
+from safe_blat_parser import SafeBlatParser
 
 def blast_protein(arg):
     """
@@ -139,15 +139,18 @@ def blat_proteins(specie1, specie2, reverse=False):
     specie1_file = get_protein_filename(specie1)
     specie2_file = get_protein_filename(specie2)
 
-    result_file = specie1 + '_' + specie2 + '.psl'
+    results_file = specie1 + '_' + specie2 + '.psl'
 
     # execute blat as a subprocess
-    cmd = ['blat', '-prot', specie2_file, specie1_file, result_file]
+    cmd = ['blat', '-prot', specie2_file, specie1_file, results_file]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # parse the output of blat and get a correspondence_table
-    with open(result_file) as f:
-        parser = BlatPslParser(f)
+    with open(results_file) as f:
+        # Use a modified parser that can handle parsing errors
+        # and will log warnings instead of raising exceptions
+        # when such occur.
+        parser = SafeBlatParser(f)
         correspondences = {}
         for match in parser:
             ordered_hits = sorted(match.hsps, key=lambda hsp: hsp.ident_pct, reverse=True)
@@ -160,7 +163,7 @@ def blat_proteins(specie1, specie2, reverse=False):
                 correspondences[key] = best_match.ident_pct
 
     # Delete the psl file
-    os.remove(result_file)
+    os.remove(results_file)
 
     return correspondences
 
