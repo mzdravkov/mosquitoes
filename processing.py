@@ -19,17 +19,23 @@ def __get_genome_combinations(genomes):
     return combinations
 
 
-def get_genome_pairs_for_processing(genomes):
+def get_genome_pairs_for_processing(genomes, overwrite=False):
     """
-    Returns a list of genome pairs that are not yet processed.
+    Returns a list of genome pairs that are not yet processed
+    (except if overwrite is True, in which case all pairs will be returned).
     """
+    # sort each pair to match the filename format
+    genome_combinations = (tuple(sorted(pair)) for pair in __get_genome_combinations(genomes))
+
+    if overwrite:
+        return list(genome_combinations)
+
+    # if not overwriting, only return the genome pairs that are not yet processed
     processed_genome_pairs = set()
     for filename in os.listdir(CORRESPONDENCES_DIR):
         if filename.endswith('.csv'):
             genome1, genome2 = filename.rstrip('.csv').split('-')
             processed_genome_pairs.add((genome1, genome2))
-    # sort each pair to match the filename format
-    genome_combinations = (tuple(sorted(pair)) for pair in __get_genome_combinations(genomes))
     return [pair for pair in genome_combinations if pair not in processed_genome_pairs]
 
 
@@ -108,7 +114,7 @@ def align(args):
     #     ]
     # genome_pairs = get_genome_pairs_for_processing(proteins)
 
-    genome_pairs = get_genome_pairs_for_processing(prot_assemblies)
+    genome_pairs = get_genome_pairs_for_processing(prot_assemblies, args.overwrite)
 
     logging.info('Got {} genome pairs for processing'.format(len(genome_pairs)))
     print('Got {} genome pairs for processing'.format(len(genome_pairs)))

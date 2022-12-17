@@ -23,6 +23,7 @@ from ncbi.datasets.openapi.model.v1_annotation_for_assembly_type import V1Annota
 from storage import SEQUENCES_DIR, get_protein_filename
 from storage import get_dataset_filename
 from safe_blat_parser import SafeBlatParser
+from psl import parse_psl
 
 def blast_protein(arg):
     """
@@ -146,21 +147,15 @@ def blat_proteins(specie1, specie2, reverse=False):
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # parse the output of blat and get a correspondence_table
-    with open(results_file) as f:
-        # Use a modified parser that can handle parsing errors
-        # and will log warnings instead of raising exceptions
-        # when such occur.
-        parser = SafeBlatParser(f)
-        correspondences = {}
-        for match in parser:
-            ordered_hits = sorted(match.hsps, key=lambda hsp: hsp.ident_pct, reverse=True)
-            best_match = None
-            if len(ordered_hits) > 0:
-                best_match = ordered_hits[0]
-                key = (best_match.query_id, best_match.hit_id)
-                if reverse:
-                    key = (best_match.hit_id, best_match.query_id)
-                correspondences[key] = best_match.ident_pct
+    df = parse_psl(results_file, is_protein=True)
+
+    correspondences = {}
+    for row in df.iterrows():
+        rowdata = row[1]
+        key = (rowdata['qname'], rowdata['tname'])
+        if reverse:
+            key = (rowdata['tname'], rowdata['qname'])
+        correspondences[key] = rowdata['identity']
 
     # Delete the psl file
     if os.path.exists(results_file):
