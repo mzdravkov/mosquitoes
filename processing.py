@@ -36,7 +36,7 @@ def get_genome_pairs_for_processing(genomes, overwrite=False):
         if filename.endswith('.csv'):
             genome1, genome2 = filename.rstrip('.csv').split('-')
             processed_genome_pairs.add((genome1, genome2))
-    return [pair for pair in genome_combinations if pair not in processed_genome_pairs]
+    return {pair for pair in genome_combinations if pair not in processed_genome_pairs}
 
 
 def download_data_for_genomes(genomes):

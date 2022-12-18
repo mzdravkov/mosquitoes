@@ -1,4 +1,5 @@
 import csv
+import os
 
 from os.path import join
 
@@ -17,6 +18,11 @@ def read_protein_correspondences(filename):
     """
     with open(filename, 'r') as f:
         reader = csv.reader(f)
+        # skip header
+        try:
+            next(reader)
+        except StopIteration:
+            return []
         return list(reader)
 
 
@@ -44,3 +50,17 @@ def get_dataset_filename(accession):
 
 def get_protein_filename(accession):
     return join(SEQUENCES_DIR, accession + '.faa')
+
+
+def read_correspondences():
+    """
+    Read all correspondence data from the file system.
+    """
+    correspondence_arrs = {}
+    for filename in os.listdir(CORRESPONDENCES_DIR):
+        if filename.endswith('.csv'):
+            genome1, genome2 = filename.rstrip('.csv').split('-')
+            key = (genome1, genome2)
+            correspondences = read_protein_correspondences(join(CORRESPONDENCES_DIR, filename))
+            correspondence_arrs[key] = correspondences
+    return correspondence_arrs

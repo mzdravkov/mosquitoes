@@ -3,3 +3,4 @@ wheel>=0.38.2
 ncbi-datasets-pylib>=14.2.2
 prettytable
 pandas
+networkx
