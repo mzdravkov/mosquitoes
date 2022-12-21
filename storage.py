@@ -32,7 +32,7 @@ def save_protein_correspondences(data, filename):
     """
     with open(filename, 'w') as f:
         writer = csv.writer(f)
-        writer.writerow(['specie1_protein_id', 'specie2_protein_id', 'identity'])
+        writer.writerow(['specie1_protein_id', 'specie2_protein_id', 'score'])
         writer.writerows(data)
 
 

@@ -55,11 +55,11 @@ def download_data_for_genomes(genomes):
             
 def create_correspondance_table(args):
     specie1, specie2 = args
-    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
+    correspondences, avg_score = get_protein_correspondence_table(specie1, specie2)
     filename = get_genome_pair_filename(specie1, specie2)
     save_protein_correspondences(correspondences, filename)
-    print('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity), flush=True)
-    logging.info('Average identity score for {}-{}: {}'.format(specie1, specie2, avg_identity))
+    print('Average score for {}-{}: {}'.format(specie1, specie2, avg_score), flush=True)
+    logging.info('Average score for {}-{}: {}'.format(specie1, specie2, avg_score))
 
 
 def create_correspondence_tables_in_parallel(genome_pairs):

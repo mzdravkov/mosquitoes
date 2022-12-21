@@ -155,7 +155,7 @@ def blat_proteins(specie1, specie2, reverse=False):
         key = (rowdata['qname'], rowdata['tname'])
         if reverse:
             key = (rowdata['tname'], rowdata['qname'])
-        correspondences[key] = rowdata['identity']
+        correspondences[key] = rowdata['score']
 
     # Delete the psl file
     if os.path.exists(results_file):
@@ -186,9 +186,9 @@ def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
 def get_protein_correspondence_table(specie1, specie2):
     """
     Takes the acession ids of two species and returns a
-    protein correspondence table and an average identity score.
+    protein correspondence table and an average score.
     The correspondence table contains records of the following type:
-    (specie1_protein_id, specie2_protein_id, identity_score)
+    (specie1_protein_id, specie2_protein_id, score)
     """
     # Search specie1 proteins in specie2's proteome
     correspondences_forw = blat_proteins(specie1, specie2)
@@ -200,20 +200,20 @@ def get_protein_correspondence_table(specie1, specie2):
     # Merge the two results into a single table
     all_pairs = set(correspondences_forw.keys()).union(correspondences_back.keys())
     for pair in all_pairs:
-        identity = correspondences_forw.get(pair, correspondences_back.get(pair))
+        score = correspondences_forw.get(pair, correspondences_back.get(pair))
         if pair in correspondences_forw and pair in correspondences_back:
             # Should be the same in both places, but just in case
-            identity = (correspondences_forw[pair] + correspondences_back[pair])/2
-        correspondences.append((pair[0], pair[1], identity))
-        total_sum += identity
+            score = (correspondences_forw[pair] + correspondences_back[pair])/2
+        correspondences.append((pair[0], pair[1], score))
+        total_sum += score
 
     # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
     # add them to the table with a score of 0.
     add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
 
-    avg_identity = total_sum/len(correspondences)
+    avg_score = total_sum/len(correspondences)
 
-    return correspondences, avg_identity
+    return correspondences, avg_score
 
 
 def download_dataset(accession):

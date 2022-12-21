@@ -79,7 +79,7 @@ if __name__ == '__main__':
     print_histogram(depths)
     print('\ngroup sizes')
     group_sizes = defaultdict(lambda: 0)
-    for group in groups.values():
+    for key, group in groups.items():
         group_sizes[len(group)] += 1
     print_histogram(group_sizes)
     print(sum(group_sizes.values()))
