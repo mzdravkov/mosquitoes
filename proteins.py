@@ -147,7 +147,7 @@ def blat_proteins(specie1, specie2, reverse=False):
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # parse the output of blat and get a correspondence_table
-    df = parse_psl(results_file, is_protein=True)
+    df = parse_psl(results_file)
 
     correspondences = {}
     for row in df.iterrows():

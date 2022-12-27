@@ -5,6 +5,30 @@ import networkx as nx
 from storage import read_correspondences
 
 
+# TODO: Get anthropophily values for all species
+
+# Score indicating the degree of anthropophily of a species
+# in the range of [-1, 1], where -1 indicates a species that
+# is non-anthropophilic and 1 indicates a species that is
+# very anthropophilic.
+SPECIES_ANTHROPOPHILY = {
+'GCA_000441895.2': -0.918, # Anopheles sinensis [Ree, Han-Il, et al. 2001][PMC2712014]
+'GCF_000005575.2': 0.52, # Anopheles gambiae str. PEST [takken (PMC4381365)]
+'GCF_006496715.1': 0.96, # Aedes albopictus [Alongkot Ponlawat 2005]
+'GCF_013141755.1': -0.982, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
+'GCF_013758885.1': -0.9, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
+'GCF_015732765.1': -0.33, # Culex quinquefasciatus [takken (PMC4381365)]
+'GCF_016801865.1': -0.286, # Culex pipiens pallens [Joaquín Muñoz 2011]
+'GCF_016920715.1': -0.09, # Anopheles arabiensis [tekken (PMC4381365)]
+'GCF_017562075.2': -0.76, # Anopheles merus [Pamela C Kipyab 2013]
+'GCF_943734665.1': 0.0, # Anopheles aquasalis
+'GCF_943734685.1': 0.96, # Anopheles coluzzii [Martin C. Akogbéto 2018]
+'GCF_943734695.1': 0.0, # Anopheles maculipalpis
+'GCF_943734745.1': 0.65, # Anopheles darlingi [Marta Moreno 2017]
+'GCF_943734845.2': 0.21, # Anopheles funestus [tekken (PMC4381365)]
+}
+
+
 def graph(correspondence_arrs):
     edges = set()
     index = {}
@@ -160,9 +184,8 @@ if __name__ == '__main__':
     print('processing correspondences to find community relevance scores')
 
     for (genome1, genome2), correspondences in correspondences.items():
-        # TODO: get real values
-        species1_anthropophily = 1
-        species2_anthropophily = 1
+        species1_anthropophily = SPECIES_ANTHROPOPHILY[genome1]
+        species2_anthropophily = SPECIES_ANTHROPOPHILY[genome2]
 
         print('.', end='', flush=True)
         total_species_score = sum(float(score) for _, _, score in correspondences)
@@ -171,6 +194,7 @@ if __name__ == '__main__':
         for correspondence in correspondences:
             gene1, gene2, score_str = correspondence
             score = float(score_str)
+            score = 0.0 if score < 0 else score
 
             relevance = calculate_community_relevance(
                 score,
