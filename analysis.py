@@ -194,7 +194,10 @@ if __name__ == '__main__':
         for correspondence in correspondences:
             gene1, gene2, score_str = correspondence
             score = float(score_str)
-            score = 0.0 if score < 0 else score
+            # negative and zero scores are breaking the relevance score calculation
+            # because they may result in a complex number or division by zero, so we
+            # just set them to 1
+            score = 1 if score <= 0 else score
 
             relevance = calculate_community_relevance(
                 score,
@@ -214,7 +217,12 @@ if __name__ == '__main__':
 
     community_scores = {}
     for community, relevancies in community_relevancies.items():
-        community_scores[community] = sum(relevancies.values())/len(relevancies)
+        # We calculate the relevance by using the signal-to-noise ratio.
+        # Essentially, we want to find communities that have a high average
+        # score, but this is not due to outliers that skew the average.
+        mean = sum(relevancies.values())/len(relevancies)
+        variance = sum((r - mean)**2 for r in relevancies.values())/len(relevancies)
+        community_scores[community] = mean/variance
 
     print('\nHistogram of relevance buckets')
 
