@@ -3,6 +3,7 @@ from collections import defaultdict
 import networkx as nx
 
 from storage import read_correspondences
+from utils import print_table
 
 
 # TODO: Get anthropophily values for all species
@@ -130,40 +131,13 @@ def histogram_buckets(values, num_buckets):
     return hist
 
 
-if __name__ == '__main__':
+def top_by_relevance(n):
     correspondences = read_correspondences()
     print('getting correspondence graph')
     g, index, rindex = get_correspondences_graph(correspondences)
 
     print('nodes in the graph', len(g.nodes))
 
-    # groups = {}
-    # depths = defaultdict(lambda: 0)
-    # print('\ngetting groups')
-    # i = 0
-    # for gene in index:
-    #     if gene == '':
-    #         continue
-    #     if i % 1000 == 0:
-    #         print('.', end='', flush=True)
-    #     groups[gene], depth = get_neighbors(g, index, rindex, gene, depth=10)
-    #     depths[depth] += 1
-    #     if depth == 10:
-    #         print(f'{gene} -> {depth}')
-    #     i += 1
-    # print('\ndepths')
-    # print_histogram(depths)
-    # print('\ngroup sizes')
-    # group_sizes = defaultdict(lambda: 0)
-    # for key, group in groups.items():
-    #     group_sizes[len(group)] += 1
-    # print_histogram(group_sizes)
-    # print('total members of groups', sum(group_sizes.values()))
-    # print('number of groups', len(groups))
-    # print('average group size', sum(len(g) for g in groups.values())/len(groups))
-    # print('max group size', max(len(g) for g in groups.values()))
-
-    # communities = nx.algorithms.community.louvain_communities(g, resolution=100)
     print('getting communities')
 
     communities = get_communities(g, rindex)
@@ -231,9 +205,53 @@ if __name__ == '__main__':
     for bucket, count in sorted(buckets.items(), key=lambda x: x[0]):
         print(f'{bucket}: {count}')
 
-    print('Top 20 communities:')
-    for community, score in sorted(community_scores.items(), key=lambda x: x[1], reverse=True)[:20]:
+    print('Top {n} communities:')
+    for community, score in sorted(community_scores.items(), key=lambda x: x[1], reverse=True)[:n]:
         print(f'{community}: {score}')
-        print(f'\t{communities[community]}')
+        for protein in communities[community]:
+            print(f'\t- {protein}')
 
 
+def analyse_protein(accession):
+    all_correspondences = read_correspondences()
+    print('getting correspondence graph')
+    g, index, rindex = get_correspondences_graph(all_correspondences)
+
+    print('nodes in the graph', len(g.nodes))
+
+    print('getting communities')
+
+    communities = get_communities(g, rindex)
+    community_index = get_community_membership_index(communities)
+    community = communities[community_index[accession]]
+    
+    table_data = []
+    for (genome1, genome2), correspondences in all_correspondences.items():
+        for correspondence in correspondences:
+            if correspondence[0] in community and correspondence[1] in community:
+                other = correspondence[0] if correspondence[0] != accession else correspondence[1]
+                score = float(correspondence[2])
+                avg_species_score = sum(float(c[2]) for c in correspondences)/len(correspondences)
+                relevance = calculate_community_relevance(
+                    score,
+                    avg_species_score,
+                    SPECIES_ANTHROPOPHILY[genome1],
+                    SPECIES_ANTHROPOPHILY[genome2]
+                )
+                table_data.append((
+                    genome1,
+                    SPECIES_ANTHROPOPHILY[genome1],
+                    genome2,
+                    SPECIES_ANTHROPOPHILY[genome2],
+                    avg_species_score,
+                    other,
+                    score,
+                    relevance))
+                break
+    print_table(table_data, columns=['S1', 'S1 anthropophily', 'S2', 'S2 anthropophily', 'avg species score', 'corresp. protein', 'protein score', 'relevance'])
+    mean = sum(row[-1] for row in table_data)/len(table_data)
+    variance = sum((row[-1] - mean)**2 for row in table_data)/len(table_data)
+    community_score = mean/variance
+    print('mean:', mean)
+    print('variance:', variance)
+    print('community score:', community_score)
