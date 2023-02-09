@@ -1,3 +1,5 @@
+import statistics
+
 from collections import defaultdict
 
 import networkx as nx
@@ -19,7 +21,7 @@ SPECIES_ANTHROPOPHILY = {
 'GCF_013141755.1': -0.982, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
 'GCF_013758885.1': -0.9, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
 'GCF_015732765.1': -0.33, # Culex quinquefasciatus [takken (PMC4381365)]
-'GCF_016801865.1': -0.286, # Culex pipiens pallens [Joaquín Muñoz 2011]
+'GCF_016801865.2': -0.286, # Culex pipiens pallens [Joaquín Muñoz 2011]
 'GCF_016920715.1': -0.09, # Anopheles arabiensis [tekken (PMC4381365)]
 'GCF_017562075.2': -0.76, # Anopheles merus [Pamela C Kipyab 2013]
 'GCF_943734665.1': 0.0, # Anopheles aquasalis
@@ -143,7 +145,8 @@ def top_by_relevance(n):
     communities = get_communities(g, rindex)
 
     print('number of communities', len(communities))
-    print('average size of community', sum(len(c) for c in communities)/len(communities))
+    print('average community size', sum(len(c) for c in communities)/len(communities))
+    print('median community size', statistics.median(len(c) for c in communities))
     print('max community size', max(len(c) for c in communities))
 
     com_hist = defaultdict(lambda: 0)

@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     if args.subcommand == 'align':
         align(args)
-    if args.subcommand == 'analyse':
+    elif args.subcommand == 'analyse':
         if args.protein:
             analyse_protein(args.protein)
         else:
