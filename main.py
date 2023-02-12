@@ -1,10 +1,12 @@
 import argparse
 import logging
+import pprint
 
 from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
-from analysis import analyse_protein, top_by_relevance
+from analysis import SPECIES_ANTHROPOPHILY, analyse_protein, test_proteins, top_by_relevance
 
 from processing import align
+from storage import read_correspondences
 
 
 logging.basicConfig(filename='logs.log', level=logging.DEBUG)
@@ -30,6 +32,7 @@ parser_align = subparsers.add_parser("analyse", help="Analyse the already genera
 # Add arguments to the "analyse" subcommand parser
 parser_align.add_argument('-t', '--top', help='Find the top N most relevant proteins.', default=10)
 parser_align.add_argument('-p', '--protein', help='Analyse specefic protein by accession.')
+parser_align.add_argument('-v', '--validate', help='Run analysis on N-1 species and test on the remaining one', action='store_true')
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -40,6 +43,17 @@ if __name__ == '__main__':
         if args.protein:
             analyse_protein(args.protein)
         else:
-            top_by_relevance(int(args.top))
+            correspondences = read_correspondences()
+            if args.validate:
+                results = []
+                for test_species in SPECIES_ANTHROPOPHILY:
+                    top_proteins, homologs = top_by_relevance(correspondences, int(args.top), test_species={test_species})
+                    result = test_proteins(top_proteins, homologs, test_species)
+                    if result:
+                        results.append(result)
+                pprint.pprint(results)
+                print(len([x for x in results if x[0] == x[1]])/len(results))
+            else:
+                top_by_relevance(correspondences, int(args.top))
     else:
         parser.print_help()

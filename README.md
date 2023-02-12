@@ -38,6 +38,11 @@ $ source ~/.bashrc
 # or source ~/.zshrc (respectively)
 ```
 
+You also need the **clustal omega** executable in the your PATH. On Ubuntu:
+```bash
+sudo apt-get install clustalo
+```
+
 ## Setup
 
 ```bash

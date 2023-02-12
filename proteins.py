@@ -303,3 +303,17 @@ def has_protein_data(accession):
     """
     prot_fasta = get_protein_filename(accession)
     return os.path.isfile(prot_fasta)
+
+
+def get_protein_sequence(protein, species):
+    """
+    Takes a protein accession number and genome accession number
+    and returns the sequence for the protein as found in the
+    local sequences storage.
+    """
+    fasta_file = get_protein_filename(species)
+    with open(fasta_file) as handle:
+        for header, sequence in SimpleFastaParser(handle):
+            if header.split()[0] == protein:
+                return sequence
+    return None
