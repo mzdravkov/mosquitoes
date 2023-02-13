@@ -96,23 +96,25 @@ def align(args):
                 status_table.append((taxon_id, taxon_name, taxon_rank, accession, 'N/A'))
         else:
             status_table.append((taxon_id, taxon_name, taxon_rank, 'N/A', 'N/A'))
+            
+    if args.additional_genomes:
+        additional_genomes = args.additional_genomes.split(',')
+        print('Got {} additional genomes'.format(len(additional_genomes)))
+        for accession in additional_genomes:
+            extract_protein_data(accession)
+            if has_protein_data(accession):
+                prot_assemblies.append(accession)
+                status_table.append(('', '', '', accession, 'OK'))
+            else:
+                logging.warning('No protein data for {}'.format(accession))
+                status_table.append(('', '', '', accession, 'N/A'))
 
     status_table.sort(key=lambda x: x[1])
 
     print_table(status_table, columns=('Taxon', 'Name', 'Rank', 'Accession', 'Protein'))
 
-    # accessions = filtered_accessions
     print('Got {} accessions with protein data in their assembly'.format(len(prot_assemblies)))
     logging.info('Got {} accessions with protein data in their assembly'.format(len(prot_assemblies)))
-
-    # proteins = [
-    #     # 'GCF_000005575.2', # Anopheles gambiae
-    #     # 'GCF_016920715.1', # Anopheles arabiensis
-    #     # 'GCF_016801865.1' # Culex pipiens pallens
-    #     # 'GCF_943734845.2',
-    #     # 'GCF_013141755.1'
-    #     ]
-    # genome_pairs = get_genome_pairs_for_processing(proteins)
 
     genome_pairs = get_genome_pairs_for_processing(prot_assemblies, args.overwrite)
 

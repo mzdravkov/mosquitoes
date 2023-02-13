@@ -3,7 +3,9 @@ import logging
 import pprint
 
 from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
-from analysis import SPECIES_ANTHROPOPHILY, analyse_protein, test_proteins, top_by_relevance
+from analysis import analyse_protein
+from analysis import get_top_proteins_and_validate
+from analysis import top_by_relevance
 
 from processing import align
 from storage import read_correspondences
@@ -24,6 +26,7 @@ parser_align = subparsers.add_parser("align", help="Aligns the complete proteome
 # Add arguments to the "align" subcommand parser
 parser_align.add_argument('taxon', help='The taxon id of the subtree parent node')
 parser_align.add_argument("-w", "--overwrite", help='Overwrite existing data.', action="store_true")
+parser_align.add_argument("-a", "--additional_genomes", help='Additional genome accessions to include (as comma-separated list)')
 
 
 # Create a parser for the "analyse" subcommand
@@ -45,14 +48,7 @@ if __name__ == '__main__':
         else:
             correspondences = read_correspondences()
             if args.validate:
-                results = []
-                for test_species in SPECIES_ANTHROPOPHILY:
-                    top_proteins, homologs = top_by_relevance(correspondences, int(args.top), test_species={test_species})
-                    result = test_proteins(top_proteins, homologs, test_species)
-                    if result:
-                        results.append(result)
-                pprint.pprint(results)
-                print(len([x for x in results if x[0] == x[1]])/len(results))
+                get_top_proteins_and_validate(correspondences, args)
             else:
                 top_by_relevance(correspondences, int(args.top))
     else:

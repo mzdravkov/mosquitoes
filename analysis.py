@@ -4,6 +4,7 @@ from collections import defaultdict
 from io import StringIO
 import subprocess
 import tempfile
+import pprint
 
 import networkx as nx
 from proteins import get_protein_sequence
@@ -22,21 +23,42 @@ from Bio.SeqIO.FastaIO import SimpleFastaParser
 # in the range of [-1, 1], where -1 indicates a species that
 # is non-anthropophilic and 1 indicates a species that is
 # very anthropophilic.
+# SPECIES_ANTHROPOPHILY = {
+# 'GCA_000441895.2': -0.918, # Anopheles sinensis [Ree, Han-Il, et al. 2001][PMC2712014]
+# 'GCF_000005575.2': 0.52, # Anopheles gambiae str. PEST [takken (PMC4381365)]
+# 'GCF_006496715.1': 0.96, # Aedes albopictus [Alongkot Ponlawat 2005]
+# 'GCF_013141755.1': -0.982, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
+# 'GCF_013758885.1': -0.9, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
+# 'GCF_015732765.1': -0.33, # Culex quinquefasciatus [takken (PMC4381365)]
+# 'GCF_016801865.2': -0.286, # Culex pipiens pallens [Joaquín Muñoz 2011]
+# 'GCF_016920715.1': -0.09, # Anopheles arabiensis [tekken (PMC4381365)]
+# 'GCF_017562075.2': -0.76, # Anopheles merus [Pamela C Kipyab 2013]
+# 'GCF_943734635.1': 1.0, # Anopheles cruzii [Kirchgatter 2014, Santos 2019]
+# 'GCF_943734665.1': 0.0, # Anopheles aquasalis
+# 'GCF_943734685.1': 0.96, # Anopheles coluzzii [Martin C. Akogbéto 2018]
+# 'GCF_943734695.1': 0.0, # Anopheles maculipalpis
+# 'GCF_943734745.1': 0.65, # Anopheles darlingi [Marta Moreno 2017]
+# 'GCF_943734755.1': 1.0, # Anopheles moucheti [Sinka 2010]
+# 'GCF_943734845.2': 0.21, # Anopheles funestus [tekken (PMC4381365)]
+# }
+
 SPECIES_ANTHROPOPHILY = {
-'GCA_000441895.2': -0.918, # Anopheles sinensis [Ree, Han-Il, et al. 2001][PMC2712014]
-'GCF_000005575.2': 0.52, # Anopheles gambiae str. PEST [takken (PMC4381365)]
-'GCF_006496715.1': 0.96, # Aedes albopictus [Alongkot Ponlawat 2005]
-'GCF_013141755.1': -0.982, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
-'GCF_013758885.1': -0.9, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
-'GCF_015732765.1': -0.33, # Culex quinquefasciatus [takken (PMC4381365)]
-'GCF_016801865.2': -0.286, # Culex pipiens pallens [Joaquín Muñoz 2011]
-'GCF_016920715.1': -0.09, # Anopheles arabiensis [tekken (PMC4381365)]
-'GCF_017562075.2': -0.76, # Anopheles merus [Pamela C Kipyab 2013]
-'GCF_943734665.1': 0.0, # Anopheles aquasalis
-'GCF_943734685.1': 0.96, # Anopheles coluzzii [Martin C. Akogbéto 2018]
-'GCF_943734695.1': 0.0, # Anopheles maculipalpis
-'GCF_943734745.1': 0.65, # Anopheles darlingi [Marta Moreno 2017]
-'GCF_943734845.2': 0.21, # Anopheles funestus [tekken (PMC4381365)]
+'GCA_000441895.2': -1.0, # Anopheles sinensis [Ree, Han-Il, et al. 2001][PMC2712014]
+'GCF_000005575.2': 1.0, # Anopheles gambiae str. PEST [takken (PMC4381365)]
+'GCF_006496715.1': 1.0, # Aedes albopictus [Alongkot Ponlawat 2005]
+'GCF_013141755.1': -1.0, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
+'GCF_013758885.1': -1.0, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
+'GCF_015732765.1': -1.0, # Culex quinquefasciatus [takken (PMC4381365)]
+'GCF_016801865.2': -1.0, # Culex pipiens pallens [Joaquín Muñoz 2011]
+'GCF_016920715.1': -1.0, # Anopheles arabiensis [tekken (PMC4381365)]
+'GCF_017562075.2': -1.0, # Anopheles merus [Pamela C Kipyab 2013]
+'GCF_943734635.1': 1.0, # Anopheles cruzii [Kirchgatter 2014, Santos 2019]
+'GCF_943734665.1': 1.0, # Anopheles aquasalis
+'GCF_943734685.1': 1.0, # Anopheles coluzzii [Martin C. Akogbéto 2018]
+'GCF_943734695.1': 1.0, # Anopheles maculipalpis
+'GCF_943734745.1': 1.0, # Anopheles darlingi [Marta Moreno 2017]
+'GCF_943734755.1': 1.0, # Anopheles moucheti [Sinka 2010]
+'GCF_943734845.2': 1.0, # Anopheles funestus [tekken (PMC4381365)]
 }
 
 
@@ -262,7 +284,7 @@ def top_by_relevance(correspondences, n, test_species=None):
                 check_species_conflict(gene2, genome2, protein_species)
                 protein_species[gene2] = genome2
                 species.add(genome2)
-            
+
                 if gene2 not in homologs:
                     homologs[gene2] = {}
 
@@ -281,16 +303,16 @@ def top_by_relevance(correspondences, n, test_species=None):
                 species1_anthropophily,
                 species2_anthropophily
             )
-            
+
             homologs[gene1][gene2] = relevance
-            
+
     print('\nnumber of proteins', len(homologs))
     print('average homologous set size', sum(len(c) for c in homologs)/len(homologs))
     print('median homologous set size', statistics.median(len(c) for c in homologs))
     print('max homologous set size', max(len(c) for c in homologs))
-            
+
     protein_relevancies = {}
-    
+
     for gene, relevancies in homologs.items():
         if len(relevancies) > 0:
             mean = sum(relevancies.values())/len(relevancies)
@@ -298,8 +320,10 @@ def top_by_relevance(correspondences, n, test_species=None):
         else:
             # TODO: this is a bit random, but I'm not sure how to handle those cases
             protein_relevancies[gene] = 0.0
-            
+
     num_species = len(species)
+
+    # ALTERNATIVE: average specie ranking
 
     # species_protein_ranking = defaultdict(lambda: {})
     # max_indices = defaultdict(lambda: 0)
@@ -315,13 +339,13 @@ def top_by_relevance(correspondences, n, test_species=None):
     #     if len(ranks) > 0:
     #         mean = sum(ranks)/len(ranks)
     #         avg_ranks[protein] = mean
-    
+
     # i = 0
     # data = []
     # for protein, avg_rank in sorted(avg_ranks.items(), key=lambda x: x[1]):
     #     if len(homologs[protein]) < num_species/2:
     #         continue
-        
+
     #     if i > n:
     #         break
 
@@ -335,7 +359,7 @@ def top_by_relevance(correspondences, n, test_species=None):
     # for protein, avg_rank in sorted(avg_ranks.items(), key=lambda x: x[1]):
     #     if len(homologs[protein]) < num_species/2:
     #         continue
-        
+
     #     if i > n:
     #         break
 
@@ -353,29 +377,31 @@ def top_by_relevance(correspondences, n, test_species=None):
     #             homolog_in_species = homologs_in_species[0]
     #             index = ranking.index(homolog_in_species)
     #             ranks[protein][species] = index
-                
+
     # print(ranks)
-            
+
+    # END ALTERNATIVE: average specie ranking
+
     ordered_proteins = sorted(protein_relevancies.items(), key=lambda x: x[1], reverse=True)
 
     top_proteins = []
     i = 0
     data = []
     for protein, relevance in ordered_proteins:
-        if len(homologs[protein]) < num_species/2:
+        if len(homologs[protein]) < num_species/3:
             continue
-        
+
         if i > n:
             break
-        
+
         top_proteins.append(protein)
 
         for homolog, pairwise_relevance in homologs[protein].items():
             data.append((protein, relevance, homolog, protein_relevancies.get(homolog, None), pairwise_relevance))
 
         i += 1
+
     print_table(data, columns=('protein', 'relevance', 'homolog', 'homolog_relevance', 'pairwise_relevance'))
-    
 
     top_proteins_homologs = defaultdict(lambda: [])
     for protein in top_proteins:
@@ -396,24 +422,24 @@ def get_consensus_seq(homologs, species):
                 sequences[accession] = sequence
             else:
                 raise RuntimeError("Can't find protein sequence {} in genome {}".format(accession, specie))
-            
+
     if len(sequences) == 0:
         return None
     elif len(sequences) == 1:
         return list(sequences.values())[0]
-    
+
     with tempfile.NamedTemporaryFile() as f:
         for accession, sequence in sequences.items():
             f.write(bytes(">{}\n".format(accession), 'utf-8'))
             f.write(bytes("{}\n".format(sequence), 'utf-8'))
         f.flush()
-        
+
         cmd = ['clustalo', '--seqtype', 'Protein', '-i', f.name]
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         alignment_fasta = str(result.stdout, 'utf-8')
         alignment = AlignIO.read(StringIO(alignment_fasta), "fasta")
         align_summary = SummaryInfo(alignment)
-        return align_summary.dumb_consensus()
+        return align_summary.dumb_consensus(threshold=0.5)
 
 
 def test_proteins(proteins, homologs, test_species=None):
@@ -429,15 +455,15 @@ def test_proteins(proteins, homologs, test_species=None):
                      if s != test_species
                      and SPECIES_ANTHROPOPHILY[s] > 0.333},
     }
-    
+
     group_scores = defaultdict(lambda: [])
-    
+
     for protein in proteins:
         test_homolog = next((h for h, s in homologs[protein] if s == test_species), None)
         if not test_homolog:
             print('No homolog for protein {} in test specie {}'.format(protein, test_species))
             continue
-        
+
         test_homolog_seq = get_protein_sequence(test_homolog, test_species)
         for anthropophily, species in anthropophily_groups.items():
             consensus = get_consensus_seq(homologs[protein], species)
@@ -448,10 +474,10 @@ def test_proteins(proteins, homologs, test_species=None):
             score = aligner.score(test_homolog_seq, consensus)
             group_scores[anthropophily].append(score)
             print(protein, anthropophily, test_homolog, score)
-            
+
     if len(group_scores) == 0:
         return None
-            
+
     group_avg_scores = [(group, sum(scores)/len(scores)) for group, scores in group_scores.items()]
     group = sorted(group_avg_scores, key=lambda x: x[1], reverse=True)[0]
     expected_group = "LOW"
@@ -460,6 +486,19 @@ def test_proteins(proteins, homologs, test_species=None):
     elif SPECIES_ANTHROPOPHILY[test_species] > 0.333:
         expected_group = "HIGH"
     return (group[0], expected_group)
+
+
+def get_top_proteins_and_validate(correspondences, args):
+    results = []
+
+    for test_specie in SPECIES_ANTHROPOPHILY:
+        top_proteins, homologs = top_by_relevance(correspondences, int(args.top), test_species={test_specie})
+        result = test_proteins(top_proteins, homologs, test_specie)
+        if result:
+            results.append(result)
+
+    pprint.pprint(results)
+    print(len([x for x in results if x[0] == x[1]])/len(results))
 
 
 def analyse_protein(accession):
@@ -474,7 +513,7 @@ def analyse_protein(accession):
     communities = get_communities(g, rindex)
     community_index = get_community_membership_index(communities)
     community = communities[community_index[accession]]
-    
+
     table_data = []
     for (genome1, genome2), correspondences in all_correspondences.items():
         for correspondence in correspondences:
