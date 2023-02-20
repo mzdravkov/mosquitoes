@@ -13,10 +13,9 @@ The project is for now based on proteome analysis.
 Essentially, the approach is:
 1. Get the proteome of each mosquito species for which we can.
 2. For each pair of species, get each protein in their proteomes and find the closest homolog from the other species along with the similarity score. This gives us a correspondence table with columns: $(species_1, species_2, protein_1, protein_2, score)$
-3. For each pair of proteins we calculate a relevance score: _relevance = (genes_similarity/species_similarity)_<sup>anthropophily_similarity</sup>, where _anthropophily_similarity_ is in the range $[-1,1]$ (-1 for high dissimilarity and 1 for high similarity).
-4. Use the correspondence table to build a graph where homologous proteins are connected. Use community detection to find "genes".
-5. Find the signal to noise ratio for each community (i.e. mean/variance).
-6. Get the top N communities by score as our suggested anthropophily genes.
+3. For each row in the corrospondence table (pair of homologous proteins) we calculate a relevance score: _relevance = (genes_similarity/species_similarity)_<sup>anthropophily_similarity</sup>, where _anthropophily_similarity_ is in the range $[-1,1]$ (-1 for high dissimilarity and 1 for high similarity).
+4. Each protein is assigned the average relevance score from all homologous pairs it is part of.
+5. Get the top N proteins by relevance.
 
 ## Prerequisites:
 You have to have python3 installed.

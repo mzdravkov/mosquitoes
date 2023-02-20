@@ -193,23 +193,28 @@ def get_protein_correspondence_table(specie1, specie2):
     # Search specie1 proteins in specie2's proteome
     correspondences_forw = blat_proteins(specie1, specie2)
     # Search specie2 proteins in specie1's proteome
-    correspondences_back = blat_proteins(specie2, specie1, reverse=True)
+    # correspondences_back = blat_proteins(specie2, specie1, reverse=True)
 
     correspondences = []
     total_sum = 0
-    # Merge the two results into a single table
-    all_pairs = set(correspondences_forw.keys()).union(correspondences_back.keys())
-    for pair in all_pairs:
-        score = correspondences_forw.get(pair, correspondences_back.get(pair))
-        if pair in correspondences_forw and pair in correspondences_back:
-            # Should be the same in both places, but just in case
-            score = (correspondences_forw[pair] + correspondences_back[pair])/2
-        correspondences.append((pair[0], pair[1], score))
-        total_sum += score
+    # # Merge the two results into a single table
+    # all_pairs = set(correspondences_forw.keys()).union(correspondences_back.keys())
+    # for pair in all_pairs:
+    #     score = correspondences_forw.get(pair, correspondences_back.get(pair))
+    #     if pair in correspondences_forw and pair in correspondences_back:
+    #         # Should be the same in both places, but just in case
+    #         score = (correspondences_forw[pair] + correspondences_back[pair])/2
+    #     correspondences.append((pair[0], pair[1], score))
+    #     total_sum += score
 
     # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
     # add them to the table with a score of 0.
-    add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
+    # add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
+
+    for pair in correspondences_forw:
+        score = correspondences_forw[pair]
+        correspondences.append((pair[0], pair[1], score))
+        total_sum += score
 
     avg_score = total_sum/len(correspondences)
 
