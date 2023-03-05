@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from analysis import analyse_protein
+from analysis import analyse_protein, avg_score_for_phenotypic_groups
 from analysis import moving_window_validation
 from analysis import get_top_proteins_and_validate
 from analysis import top_by_relevance
@@ -38,6 +38,8 @@ parser_align.add_argument('-w', '--window', help='Run validation on a window wit
 parser_align.add_argument('-W', '--window_size', help='Size of the moving window for the validation', type=int, default=5)
 parser_align.add_argument('-s', '--window_step', help='Window step', type=int, default=1)
 
+parser_check_grouping = subparsers.add_parser("check_grouping", help="Check whether the phenotype grouping depends on the genetic similarity between species.")
+
 if __name__ == '__main__':
     args = parser.parse_args()
 
@@ -54,5 +56,7 @@ if __name__ == '__main__':
                     get_top_proteins_and_validate(args.top)
             else:
                 top_by_relevance(args.top)
+    elif args.subcommand == 'check_grouping':
+        avg_score_for_phenotypic_groups()
     else:
         parser.print_help()

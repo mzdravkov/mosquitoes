@@ -18,7 +18,7 @@ Essentially, the approach is:
 5. Get the top N proteins by relevance.
 
 ## Prerequisites:
-You have to have python3 installed.
+You have to have python3 installed, with version >= 3.8.
 
 You have to have the **blat** executable in the your PATH.
 

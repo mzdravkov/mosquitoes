@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import pprint
 
+from sklearn.metrics import silhouette_score
 import networkx as nx
 from proteins import get_protein_sequence
 
@@ -36,12 +37,15 @@ from Bio.Align.AlignInfo import SummaryInfo
 # 'GCF_016920715.1': -0.09, # Anopheles arabiensis [tekken (PMC4381365)]
 # 'GCF_017562075.2': -0.76, # Anopheles merus [Pamela C Kipyab 2013]
 # 'GCF_943734635.1': 1.0, # Anopheles cruzii [Kirchgatter 2014, Santos 2019]
+# 'GCF_943734655.1': , # Sabethes cyaneus
 # 'GCF_943734665.1': 0.0, # Anopheles aquasalis
 # 'GCF_943734685.1': 0.96, # Anopheles coluzzii [Martin C. Akogbéto 2018]
 # 'GCF_943734695.1': 0.0, # Anopheles maculipalpis
+# 'GCF_943734725.1': , # Anopheles marshallii
 # 'GCF_943734745.1': 0.65, # Anopheles darlingi [Marta Moreno 2017]
 # 'GCF_943734755.1': 1.0, # Anopheles moucheti [Sinka 2010]
 # 'GCF_943734845.2': 0.21, # Anopheles funestus [tekken (PMC4381365)]
+# 'GCF_943737925.1': , # Anopheles nili
 # }
 
 SPECIES_ANTHROPOPHILY = {
@@ -55,12 +59,15 @@ SPECIES_ANTHROPOPHILY = {
 'GCF_016920715.1': -1.0, # Anopheles arabiensis [tekken (PMC4381365)]
 'GCF_017562075.2': -1.0, # Anopheles merus [Pamela C Kipyab 2013]
 'GCF_943734635.1': 1.0, # Anopheles cruzii [Kirchgatter 2014, Santos 2019]
+'GCF_943734655.1': 1.0, # Sabethes cyaneus [Leticia Smith 2023]
 'GCF_943734665.1': 1.0, # Anopheles aquasalis
 'GCF_943734685.1': 1.0, # Anopheles coluzzii [Martin C. Akogbéto 2018]
 'GCF_943734695.1': 1.0, # Anopheles maculipalpis
+'GCF_943734725.1': 1.0, # Anopheles marshallii [Boris Makanga 2016]
 'GCF_943734745.1': 1.0, # Anopheles darlingi [Marta Moreno 2017]
 'GCF_943734755.1': 1.0, # Anopheles moucheti [Sinka 2010]
 'GCF_943734845.2': 1.0, # Anopheles funestus [tekken (PMC4381365)]
+'GCF_943737925.1': 1.0, # Anopheles nili [Antonio-Nkondjio 2013 (Anopheles mosquitoes book)]
 }
 
 
@@ -93,7 +100,7 @@ def graph(correspondence_arrs):
     g = nx.Graph()
     g.add_nodes_from(index.values())
     g.add_edges_from(edges)
-    g.remove_node(index[''])
+    # g.remove_node(index[''])
     # g.add_weighted_edges_from((e[0], e[1], w) for e, w in edges.items())
     return g, index, reverse_index
 
@@ -147,7 +154,10 @@ def calculate_relevance(genes_similarity, species_similarity, anthropophily1, an
     # TODO: think about finding a better way to measure anthropophily similarity
     anthropophily_similarity = 1 - abs(anthropophily1 - anthropophily2)
 
-    return (genes_similarity/(species_similarity + 1)) ** anthropophily_similarity
+    # return (genes_similarity/(species_similarity + 1)) ** anthropophily_similarity
+
+    weight = 1 - species_similarity/100.0 if anthropophily_similarity == 1 else species_similarity/100.0
+    return weight * anthropophily_similarity * (genes_similarity - species_similarity)
 
 
 def histogram_buckets(values, num_buckets):
@@ -264,7 +274,7 @@ def top_by_relevance(n, test_species=None):
     """
     Finds a list of the N best protein candidates
     based on their relevance scores.
-    If given a test_specie it will ignore this species from the
+    If given a test_species it will ignore this species from the
     analysis so that it can be used to test the results.
     """
     correspondences = read_correspondences()
@@ -274,6 +284,8 @@ def top_by_relevance(n, test_species=None):
     homologs = defaultdict(lambda: {})
     # Set of all species (genome accessions)
     species = set()
+
+    null_protein = 0
 
     # Calculate the relevance scores between each protein and every one of its homologs
     # (note: we only work with the best homolog to the protein from every species)
@@ -292,6 +304,10 @@ def top_by_relevance(n, test_species=None):
         for correspondence in correspondences:
             gene1, gene2, score_str = correspondence
 
+            if gene2 == '':
+                gene2 = 'null_' + str(null_protein)
+                null_protein += 1
+
             if gene1:
                 check_species_conflict(gene1, genome1, protein_species)
                 protein_species[gene1] = genome1
@@ -308,8 +324,8 @@ def top_by_relevance(n, test_species=None):
                 if gene2 not in homologs:
                     homologs[gene2] = {}
 
-            if gene1 == '' or gene2 == '':
-                continue
+            # if gene1 == '' or gene2 == '':
+            #     continue
 
             score = float(score_str)
             # negative and zero scores are breaking the relevance score calculation
@@ -329,8 +345,10 @@ def top_by_relevance(n, test_species=None):
             # comparisons against it.
             if ignore_relevancies:
                 homologs[gene1][gene2] = None
+                # homologs[gene2][gene1] = None
             else:
                 homologs[gene1][gene2] = relevance
+                # homologs[gene2][gene1] = relevance
 
     protein_relevancies = {}
 
@@ -345,9 +363,20 @@ def top_by_relevance(n, test_species=None):
             # TODO: this is a bit random, but I'm not sure how to handle those cases
             protein_relevancies[gene] = 0.0
 
+    # Make sure that a protein is truly relevant by taking not only its own
+    # relevance score, but also the relevance score of its homologs.
+    consistent_relevancies = {}
+    for gene, gene_relevance in protein_relevancies.items():
+        filtered_homologs = [homolog for homolog, score in homologs[gene].items() if score is not None and homolog != '']
+        homolog_sum = sum(protein_relevancies[homolog] for homolog in filtered_homologs)
+        relevance_sum = homolog_sum + gene_relevance
+        consistent_relevance = relevance_sum/(len(filtered_homologs) + 1)
+        consistent_relevancies[gene] = consistent_relevance
+
     num_species = len(species)
 
-    ordered_proteins = sorted(protein_relevancies.items(), key=lambda x: x[1], reverse=True)
+    ordered_proteins = sorted(consistent_relevancies.items(), key=lambda x: x[1], reverse=True)
+    # ordered_proteins = sorted(protein_relevancies.items(), key=lambda x: x[1], reverse=True)
 
     # Get the N top proteins, ignoring those that are not sufficiently represented
     top_proteins = []
@@ -358,7 +387,7 @@ def top_by_relevance(n, test_species=None):
         if i >= n:
             break
 
-        non_zero_homologs = [h for h, score in homologs[protein].items() if score and score > 0]
+        non_zero_homologs = [h for h, score in homologs[protein].items() if not h.startswith('null') and score and score > 0]
         # If it is not present in at least a third of the
         # species, then we ignore it.
         if len(non_zero_homologs) + 1 < num_species/3:
@@ -371,16 +400,26 @@ def top_by_relevance(n, test_species=None):
         included_as_homolog.update(homologs[protein].keys())
 
         for homolog, pairwise_relevance in homologs[protein].items():
-            data.append((protein, relevance, homolog, protein_relevancies.get(homolog, None), pairwise_relevance))
+            prot_species = protein_species.get(protein, '')
+            homolog_species = protein_species.get(homolog, '')
+            relevance_str = '{:.2f}'.format(relevance)
+            # homolog_relevance = protein_relevancies.get(homolog)
+            homolog_relevance = consistent_relevancies.get(homolog)
+            homolog_relevance_str = '{:.2f}'.format(homolog_relevance) if homolog_relevance else ''
+            pairwise_relevance_str = '{:.2f}'.format(pairwise_relevance) if pairwise_relevance else ''
+            data.append((prot_species, protein, relevance_str, homolog_species, homolog, homolog_relevance_str, pairwise_relevance_str))
 
         i += 1
 
-    print_table(data, columns=('protein', 'relevance', 'homolog', 'homolog_relevance', 'pairwise_relevance'))
+    print('')
+    print_table(data, columns=('protein_species', 'protein', 'relevance', 'homolog_species', 'homolog', 'homolog_relevance', 'pairwise_relevance'))
 
     top_proteins_homologs = defaultdict(lambda: [])
     for protein in top_proteins:
         top_proteins_homologs[protein].append((protein, protein_species[protein]))
         for homolog in homologs[protein]:
+            if homolog == '':
+                continue
             top_proteins_homologs[protein].append((homolog, protein_species[homolog]))
 
     control_proteins = random.sample(homologs.keys(), n)
@@ -388,9 +427,27 @@ def top_by_relevance(n, test_species=None):
     for protein in control_proteins:
         control_homologs[protein].append((protein, protein_species[protein]))
         for homolog in homologs[protein]:
+            if homolog == '':
+                continue
             control_homologs[protein].append((homolog, protein_species[homolog]))
 
     return top_proteins, top_proteins_homologs, control_proteins, control_homologs
+
+
+def get_homolog_seqs(homologs, species):
+    """
+    Get the sequences for the homologs that are in the given species.
+    """
+    sequences = {}
+    for specie in species:
+        accession = next((h for h, s in homologs if s == specie and not h.startswith('null')), None)
+        if accession:
+            sequence = get_protein_sequence(accession, specie)
+            if sequence:
+                sequences[accession] = sequence
+            else:
+                raise RuntimeError("Can't find protein sequence {} in genome {}".format(accession, specie))
+    return sequences
 
 
 def get_consensus_seq(homologs, species):
@@ -398,17 +455,7 @@ def get_consensus_seq(homologs, species):
     Constructs a consensus sequence from the subset
     of homologs found in a list of species.
     """
-
-    # Get the sequences for the homologs that are in the given species.
-    sequences = {}
-    for specie in species:
-        accession = next((h for h, s in homologs if s == specie), None)
-        if accession:
-            sequence = get_protein_sequence(accession, specie)
-            if sequence:
-                sequences[accession] = sequence
-            else:
-                raise RuntimeError("Can't find protein sequence {} in genome {}".format(accession, specie))
+    sequences = get_homolog_seqs(homologs, species)
 
     if len(sequences) == 0:
         return None
@@ -446,39 +493,70 @@ def get_anthropophily_groups(test_species=None):
     }
 
 
+def get_expected_species_group(test_species):
+    expected_group = "LOW"
+    if SPECIES_ANTHROPOPHILY[test_species] > -0.333 and SPECIES_ANTHROPOPHILY[test_species] <= 0.333:
+        expected_group = "AMBIVALENT"
+    elif SPECIES_ANTHROPOPHILY[test_species] > 0.333:
+        expected_group = "HIGH"
+    return expected_group
+
+
 def test_proteins(proteins, homologs, test_species=None):
     anthropophily_groups = get_anthropophily_groups(test_species)
 
-    group_scores = defaultdict(lambda: [])
+    group_scores = defaultdict(lambda: 0)
 
     for protein in proteins:
-        test_homolog = next((h for h, s in homologs[protein] if s == test_species), None)
+        test_homolog = next((h for h, s in homologs[protein] if s == test_species and not h.startswith('null')), None)
         if not test_homolog:
+            # If we don't have a homologous protein in the test specie we cannot compare it
+            # to the consensus sequences of the protein in the different anthropophily groups.
+            # Instead, we check if some of the groups also misses this protein and choose that
+            # group as "more similar".
+            group_occurances = []
+            for anthropophily, species in anthropophily_groups.items():
+                if len(species) == 0:
+                    continue
+                sequences = get_homolog_seqs(homologs[protein], species)
+                group_occurances.append((anthropophily, len(sequences)))
+            best_group = sorted(group_occurances, key=lambda x: x[1])[0][0]
+            group_scores[best_group] += 1
+
             print('No homolog for protein {} in test specie {}'.format(protein, test_species))
+            print('Using an alteranative strategy to pick best group: ', best_group)
             continue
 
         test_homolog_seq = get_protein_sequence(test_homolog, test_species)
+        max_score = 0
+        best_group = None
         for anthropophily, species in anthropophily_groups.items():
             consensus = get_consensus_seq(homologs[protein], species)
             if not consensus:
                 print('No consensus sequence for protein {} and test specie {}'.format(protein, test_species))
                 continue
             aligner = PairwiseAligner(scoring='blastp')
-            score = aligner.score(test_homolog_seq, consensus)
-            group_scores[anthropophily].append(score)
+            try:
+                score = aligner.score(test_homolog_seq, consensus)
+            except:
+                print(test_homolog_seq)
+                print(consensus)
+            # group_scores[anthropophily].append(score)
+            if score > max_score:
+                max_score = score
+                best_group = anthropophily
             print(protein, anthropophily, test_homolog, score)
+        if best_group:
+            group_scores[best_group] += 1
 
     if len(group_scores) == 0:
         return None
 
-    group_avg_scores = [(group, sum(scores)/len(scores)) for group, scores in group_scores.items()]
-    group = sorted(group_avg_scores, key=lambda x: x[1], reverse=True)[0]
-    expected_group = "LOW"
-    if SPECIES_ANTHROPOPHILY[test_species] > -0.333 and SPECIES_ANTHROPOPHILY[test_species] <= 0.333:
-        expected_group = "AMBIVALENT"
-    elif SPECIES_ANTHROPOPHILY[test_species] > 0.333:
-        expected_group = "HIGH"
-    return (group[0], expected_group)
+    # group_avg_scores = [(group, sum(scores)/len(scores)) for group, scores in group_scores.items()]
+    # group = sorted(group_avg_scores, key=lambda x: x[1], reverse=True)[0]
+    group = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)[0]
+    expected_group = get_expected_species_group(test_species)
+    return (test_species, group[0], expected_group)
 
 
 def get_top_proteins_and_validate(proteins_num, window=None):
@@ -496,6 +574,7 @@ def get_top_proteins_and_validate(proteins_num, window=None):
             control_proteins = control_proteins[window[0]:window[1]]
         proteins.update(top_proteins)
         result = test_proteins(top_proteins, homologs, test_specie)
+        print("RESULT: ", result)
         if result:
             results.append(result)
         control = test_proteins(control_proteins, control_homologs, test_specie)
@@ -507,23 +586,29 @@ def get_top_proteins_and_validate(proteins_num, window=None):
         print(protein)
 
     print('Validation results:')
-    print_table(results, columns=('Predicted', 'Expected'))
-    accuracy = len([x for x in results if x[0] == x[1]])/len(results)
+    print_table(results, columns=('Test Species', 'Predicted', 'Expected'))
+    accuracy = len([x for x in results if x[1] == x[2]])/len(results)
     print('Prediction accuracy:', accuracy)
-    print("Control: ", len([x for x in control_results if x[0] == x[1]])/len(control_results))
-    return accuracy
+    print("Control: ", len([x for x in control_results if x[1] == x[2]])/len(control_results))
+    return accuracy, proteins
 
 
 def moving_window_validation(proteins_num, window_size, window_step):
     start = 0
     end = window_size
     accuracies = []
+    collected_proteins = set()
     while end < proteins_num:
+        print('Window: {}-{}'.format(start, end))
         window = (start, end)
-        accuracy = get_top_proteins_and_validate(proteins_num, window)
+        accuracy, proteins = get_top_proteins_and_validate(proteins_num, window)
+        collected_proteins.update(proteins)
         accuracies.append((window, accuracy))
         start += window_step
         end += window_step
+    print("Collected proteins:")
+    for protein in proteins:
+        print(protein)
     pprint.pprint(accuracies)
     return accuracies
 
@@ -573,6 +658,40 @@ genome2,
     print('community score:', community_score)
 
 
+def get_clustering_silhouette_score():
+    correspondences = read_correspondences()
+
+    avg_species_scores = {}
+    for (genome1, genome2), correspondences in correspondences.items():
+        total_species_score = sum(float(score) for _, _, score in correspondences)
+        avg_species_score = total_species_score / len(correspondences)
+        avg_species_scores[(genome1, genome2)] = avg_species_score
+
+    anthropophily_groups = get_anthropophily_groups()
+
+    labels = []
+    # Get a list of labels
+    for species in SPECIES_ANTHROPOPHILY:
+        for group, group_species in anthropophily_groups.items():
+            if species in group_species:
+                labels.append(group)
+
+    distances = []
+    # Get a matrix with distances between pairs of species
+    for species1 in SPECIES_ANTHROPOPHILY:
+        row = []
+        for species2 in SPECIES_ANTHROPOPHILY:
+            if species2 == species2:
+                row.append(0)
+            else:
+                score = avg_species_scores.get((species1, species2), avg_species_scores[(species2, species1)])
+                distance = 1/score
+                row.append(distance)
+        distances.append(row)
+
+    return silhouette_score(distances, labels, metric='precomputed')
+
+
 def avg_score_for_phenotypic_groups():
     correspondences = read_correspondences()
     avg_species_scores = {}
@@ -594,3 +713,5 @@ def avg_score_for_phenotypic_groups():
                 scores.append(avg_score)
         if len(scores) > 0:
             print('Average score of pairs between group {} and {}: {}'.format(g1, g2, sum(scores)/len(scores)))
+
+    print('Silhuette score:', get_clustering_silhouette_score())

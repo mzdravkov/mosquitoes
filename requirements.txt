@@ -4,3 +4,4 @@ ncbi-datasets-pylib>=14.2.2
 prettytable
 pandas
 networkx
+sklearn

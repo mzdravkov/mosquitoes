@@ -1,6 +1,6 @@
 import pandas as pd
 
-from Bio.SearchIO.BlatIO import _calc_score
+from Bio.SearchIO.BlatIO import _calc_millibad
 
 
 PSL_HEADER = [
@@ -27,19 +27,22 @@ PSL_HEADER = [
     "tstarts", # tStarts
 ]
 
+def _calc_identity_pct(row, is_protein=False):
+    return 100.0 - _calc_millibad(row, is_protein)*0.1
 
-def _get_score_column(psl, is_protein=False):
-    return psl.apply(_calc_score, axis=1, is_protein=is_protein)
+
+def _get_identity_column(psl):
+    return psl.apply(_calc_identity_pct, axis=1)
 
 
 def parse_psl(psl_path):
     df = pd.read_csv(psl_path, sep='\t', skiprows=5, names=PSL_HEADER)
-    df.insert(21, "score", _get_score_column(df))
+    df.insert(21, "identity", _get_identity_column(df))
 
     # get only the best match for each query protein
-    df_max = df.groupby('qname').apply(lambda x: x.loc[x['score'].idxmax()])
+    df_max = df.groupby('qname').apply(lambda x: x.loc[x['identity'].idxmax()])
     
-    # change negative scores to 0
-    df_max.loc[df_max['score'] < 0, 'score'] = 0
+    # # change negative scores to 0
+    # df_max.loc[df_max['identity'] < 0, 'identity'] = 0
 
     return df_max
