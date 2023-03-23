@@ -1,7 +1,6 @@
 import logging
 import os
 
-from multiprocessing import Pool
 from genomes import get_accessions
 
 from proteins import download_dataset, extract_protein_data, has_protein_data
@@ -54,23 +53,13 @@ def download_data_for_genomes(genomes):
             download_dataset(genome)
             
             
-def create_correspondance_table(args):
-    specie1, specie2 = args
-    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2)
+def create_correspondance_table(specie1, specie2, sensitivity):
+    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2, sensitivity)
     filename = get_genome_pair_filename(specie1, specie2)
     save_protein_correspondences(correspondences, filename)
     print('Average identity for {}-{}: {}'.format(specie1, specie2, avg_identity), flush=True)
     logging.info('Average identity for {}-{}: {}'.format(specie1, specie2, avg_identity))
 
-
-def create_correspondence_tables_in_parallel(genome_pairs):
-    """
-    Creates a set of correspondence tables for the given
-    genome pairs and saves them to the file system.
-    """
-    with Pool() as p:
-        p.map(create_correspondance_table, genome_pairs)
-        
 
 def align(args):
     specie_taxons = list(get_species_in_taxon_subtree(args.taxon))
@@ -122,4 +111,5 @@ def align(args):
     logging.info('Got {} genome pairs for processing'.format(len(genome_pairs)))
     print('Got {} genome pairs for processing'.format(len(genome_pairs)))
 
-    create_correspondence_tables_in_parallel(genome_pairs)
+    for specie1, specie2 in genome_pairs:
+        create_correspondance_table(specie1, specie2, args.sensitivity)

@@ -23,8 +23,13 @@ parser_align = subparsers.add_parser("align", help="Aligns the complete proteome
 
 # Add arguments to the "align" subcommand parser
 parser_align.add_argument('taxon', help='The taxon id of the subtree parent node')
-parser_align.add_argument("-w", "--overwrite", help='Overwrite existing data.', action="store_true")
-parser_align.add_argument("-a", "--additional_genomes", help='Additional genome accessions to include (as comma-separated list)')
+parser_align.add_argument("-w", "--overwrite",
+                          help='Overwrite existing data.', action="store_true")
+parser_align.add_argument("-a", metavar='genome1,genome2,...', dest='additional_genomes',
+                          help='Additional genome accessions to include (as comma-separated list)')
+parser_align.add_argument("-s", dest='sensitivity',
+                          help='Alignment sensitivity that will be passed to Diamond', default='sensitive',
+                          choices=['faster', 'fast', 'mid-sensitive', 'sensitive', 'more-sensitive', 'very-sensitive', 'ultra-sensitive'])
 
 
 # Create a parser for the "analyse" subcommand

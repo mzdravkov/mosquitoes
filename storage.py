@@ -52,6 +52,10 @@ def get_protein_filename(accession):
     return join(SEQUENCES_DIR, accession + '.faa')
 
 
+def get_diamond_db_filename(accession):
+    return join(SEQUENCES_DIR, accession + '.dmnd')
+
+
 def read_correspondences():
     """
     Read all correspondence data from the file system.

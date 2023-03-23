@@ -20,7 +20,7 @@ from ncbi.datasets.package import dataset
 from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
 from ncbi.datasets.openapi.model.v1_annotation_for_assembly_type import V1AnnotationForAssemblyType
 
-from storage import SEQUENCES_DIR, get_protein_filename
+from storage import SEQUENCES_DIR, get_diamond_db_filename, get_protein_filename
 from storage import get_dataset_filename
 from safe_blat_parser import SafeBlatParser
 from psl import parse_psl
@@ -163,6 +163,37 @@ def blat_proteins(specie1, specie2, reverse=False):
 
     return correspondences
 
+def diamond_align(specie1, specie2, reverse=False, sensitivity='sensitive'):
+    specie1_file = get_protein_filename(specie1)
+    specie2_file = get_protein_filename(specie2)
+
+    # prepare diamond-formatted DB file for specie2 if missing
+    specie2_db_file = get_diamond_db_filename(specie2)
+    if not os.path.isfile(specie2_db_file):
+        makedb = ['diamond', 'makedb', '--in', specie2_file, '--db', specie2_db_file]
+        subprocess.run(makedb, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # execute diamond as a subprocess
+    cmd = """
+    diamond blastp --db {db}
+                   -q {query}
+                   --max-target-seqs 1
+                   --{sensitivity}
+                   -f 6 qseqid sseqid pident
+
+    """.format(db=specie2_db_file, query=specie1_file, sensitivity=sensitivity)
+    proc = subprocess.run(cmd.split(), capture_output=True, text=True)
+
+    # parse the output of diamond and get a correspondence_table
+    correspondences = {}
+    for line in proc.stdout.splitlines():
+        query, hit, identity = line.rstrip().split('\t')
+        key = (query, hit)
+        if reverse:
+            key = (hit, query)
+        correspondences[key] = float(identity)
+
+    return correspondences
 
 def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
     """
@@ -183,7 +214,7 @@ def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
     #             correspondences.append((None, id, 0))
 
 
-def get_protein_correspondence_table(specie1, specie2):
+def get_protein_correspondence_table(specie1, specie2, sensitivity):
     """
     Takes the acession ids of two species and returns a
     protein correspondence table and an average identity percentage.
@@ -191,7 +222,7 @@ def get_protein_correspondence_table(specie1, specie2):
     (specie1_protein_id, specie2_protein_id, identity)
     """
     # Search specie1 proteins in specie2's proteome
-    correspondences_forw = blat_proteins(specie1, specie2)
+    correspondences_forw = diamond_align(specie1, specie2, sensitivity=sensitivity)
     # Search specie2 proteins in specie1's proteome
     # correspondences_back = blat_proteins(specie2, specie1, reverse=True)
 

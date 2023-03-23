@@ -20,14 +20,14 @@ Essentially, the approach is:
 ## Prerequisites:
 You have to have python3 installed, with version >= 3.8.
 
-You have to have the **blat** executable in the your PATH.
+You have to have the **diamond** executable in the your PATH.
 
-You can download it from: http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/blat/
+You can download it from: https://github.com/bbuchfink/diamond/releases and decompress it.
 If you're using bash, you can make it accessible by: 
 ```bash
 $ mkdir ~/bin
-$ mv path/to/blat ~/bin
-$ chmod +x ~/bin/blat
+$ mv path/to/diamond ~/bin
+$ chmod +x ~/bin/diamond
 
 # then add this to your ~/.bashrc (or .zshrc if you're using zsh)
 export PATH=$PATH:~/bin
