@@ -238,14 +238,14 @@ def get_protein_correspondence_table(specie1, specie2, sensitivity):
     #     correspondences.append((pair[0], pair[1], score))
     #     total_sum += score
 
-    # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
-    # add them to the table with a score of 0.
-    add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
-
     for pair in correspondences_forw:
         identity = correspondences_forw[pair]
         correspondences.append((pair[0], pair[1], identity))
         total_sum += identity
+
+    # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
+    # add them to the table with a score of 0.
+    add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
 
     avg_identity = total_sum/len(correspondences)
 

@@ -1,6 +1,8 @@
 import csv
 import os
 
+import pandas as pd
+
 from os.path import join
 
 from ncbi.datasets.package import dataset
@@ -68,3 +70,20 @@ def read_correspondences():
             correspondences = read_protein_correspondences(join(CORRESPONDENCES_DIR, filename))
             correspondence_arrs[key] = correspondences
     return correspondence_arrs
+
+
+def read_correspondences_df():
+    """
+    Read all correspondence data from the file system as a Pandas DataFrame.
+    """
+    correspondences_dfs = []
+    for filename in os.listdir(CORRESPONDENCES_DIR):
+        if filename.endswith('.csv'):
+            species1, species2 = filename.rstrip('.csv').split('-')
+            df = pd.read_csv(join(CORRESPONDENCES_DIR, filename))
+            row_count = df.shape[0]
+            df['species1'] = [species1] * row_count
+            df['species2'] = [species2] * row_count
+            correspondences_dfs.append(df)
+    merged = pd.concat(correspondences_dfs)
+    return merged.reset_index()

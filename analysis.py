@@ -1,6 +1,11 @@
 import random
 import statistics
 
+import time
+import numpy as np
+import pandas as pd
+import dask.dataframe as dd
+
 from collections import defaultdict
 from functools import lru_cache
 from itertools import combinations_with_replacement
@@ -14,6 +19,7 @@ import networkx as nx
 from proteins import get_protein_sequence
 
 from storage import read_correspondences
+from storage import read_correspondences_df
 from utils import print_table
 
 from Bio  import AlignIO
@@ -269,6 +275,86 @@ def check_species_conflict(gene, genome, protein_species):
         )
 
 
+
+@lru_cache(maxsize=None)
+def top_by_relevance_pandas(n, test_species=None):
+    """
+    Finds a list of the N best protein candidates
+    based on their relevance scores.
+    If given a test_species it will ignore this species from the
+    analysis so that it can be used to test the results.
+    """
+    print('Test species:', test_species)
+    correspondences = read_correspondences_df()
+
+    non_test = (correspondences['species1'] != test_species) \
+                & (correspondences['species2'] != test_species)
+    train_correspondences = correspondences[non_test].copy()
+
+    test_correspondences = correspondences[~non_test].copy()
+    test_correspondences.dropna()
+    test_correspondences = test_correspondences[test_correspondences['specie2_protein_id'].notna()]
+    test_homologs = {k: list(zip(v['specie2_protein_id'], v['species2']))
+                     for k, v in test_correspondences.groupby('specie1_protein_id')}
+
+    avg_species_scores = train_correspondences \
+                            .groupby(['species1', 'species2']) \
+                            .mean('identity') \
+                            .to_dict()['identity']
+
+    get_species_score = np.vectorize(lambda s1, s2: avg_species_scores[(s1, s2)])
+
+    train_correspondences['avg_species_score'] = get_species_score(
+        train_correspondences.species1,
+        train_correspondences.species2
+    )
+
+    calc_relevance = np.vectorize(
+        lambda genes_score, species_score, s1, s2: calculate_relevance(
+            genes_score, species_score, SPECIES_ANTHROPOPHILY[s1], SPECIES_ANTHROPOPHILY[s2]))
+
+    ddata = dd.from_pandas(train_correspondences, npartitions=32)
+    train_correspondences['relevance'] = ddata.map_partitions(
+        lambda df_part: calc_relevance(df_part.identity, df_part.avg_species_score, df_part.species1, df_part.species2),
+        meta=pd.Series(dtype='float', name='relevance')
+    ).compute(scheduler='processes')
+
+    prots = train_correspondences[['specie1_protein_id', 'relevance', 'species1']] \
+                .groupby('specie1_protein_id') \
+                .agg({'relevance': 'mean', 'species1': 'first'})
+    prots.columns = ['relevance', 'species']
+    prots.index.name = 'prot'
+    prots["srank"] = prots.groupby("species")["relevance"].rank(method="dense", ascending=False)
+    prots["grank"] = prots["relevance"].rank(method="dense", ascending=False)
+
+    not_na = correspondences.specie2_protein_id.notna()
+    not_na_correspondences = correspondences[not_na]
+    homologies = not_na_correspondences[['specie1_protein_id', 'specie2_protein_id']]
+
+    prots_to_homologs = prots.join(homologies.set_index('specie1_protein_id')) \
+                     .join(prots, on='specie2_protein_id', rsuffix='_2')
+    prots_to_homologs.index.name = 'prot'
+
+    rank_summed = prots_to_homologs.groupby('prot').agg({'srank_2': 'sum', 'species_2': 'count'})
+    rank_summed['srank_2'] += prots['srank']
+    rank_summed.columns = ['rank_sum', 'count']
+    relevant = rank_summed[rank_summed['count'] > (len(SPECIES_ANTHROPOPHILY)-1)/3]
+    relevant['mean_rank'] = rank_summed['rank_sum'] / rank_summed['count']
+    relevant.sort_values('mean_rank', ascending=True, inplace=True)
+
+    top_prots = relevant.head(n).index
+    print(top_prots)
+
+    top_prots_homologs_df = prots_to_homologs[prots_to_homologs.index.isin(top_prots)]
+    top_prots_homologs = {k: list(zip(v['specie2_protein_id'], v['species_2']))
+                          for k, v in top_prots_homologs_df.groupby(level=0)}
+
+    homologs = {prot: homologs + test_homologs.get(prot, [])
+                for prot, homologs in top_prots_homologs.items()}
+
+    return top_prots, homologs
+
+
 @lru_cache(maxsize=None)
 def top_by_relevance(n, test_species=None):
     """
@@ -297,7 +383,6 @@ def top_by_relevance(n, test_species=None):
         species1_anthropophily = SPECIES_ANTHROPOPHILY[genome1]
         species2_anthropophily = SPECIES_ANTHROPOPHILY[genome2]
 
-        print('.', end='', flush=True)
         total_species_score = sum(float(score) for _, _, score in correspondences)
         avg_species_score = total_species_score / len(correspondences)
 
@@ -531,9 +616,11 @@ def test_proteins(proteins, homologs, test_species=None):
         max_score = 0
         best_group = None
         for anthropophily, species in anthropophily_groups.items():
+            if anthropophily == 'AMBIVALENT':
+                continue
             consensus = get_consensus_seq(homologs[protein], species)
             if not consensus:
-                print('No consensus sequence for protein {} and test specie {}'.format(protein, test_species))
+                print('No consensus sequence in group {} for protein {} and test specie {}'.format(anthropophily, protein, test_species))
                 continue
             aligner = PairwiseAligner(scoring='blastp')
             try:
@@ -562,24 +649,27 @@ def test_proteins(proteins, homologs, test_species=None):
 def get_top_proteins_and_validate(proteins_num, window=None):
     proteins = set()
     results = []
-    control_results = []
+    # control_results = []
 
     i = 0
     for test_specie in SPECIES_ANTHROPOPHILY:
         print('Progress: {}/{}'.format(i, len(SPECIES_ANTHROPOPHILY)))
         i += 1
-        top_proteins, homologs, control_proteins, control_homologs = top_by_relevance(proteins_num, test_species=test_specie)
+        start = time.time()
+        # top_proteins, homologs, control_proteins, control_homologs = top_by_relevance(proteins_num, test_species=test_specie)
+        top_proteins, homologs = top_by_relevance_pandas(proteins_num, test_species=test_specie)
+        print('Elapsed time', time.time() - start)
         if window:
             top_proteins = top_proteins[window[0]:window[1]]
-            control_proteins = control_proteins[window[0]:window[1]]
+            # control_proteins = control_proteins[window[0]:window[1]]
         proteins.update(top_proteins)
         result = test_proteins(top_proteins, homologs, test_specie)
         print("RESULT: ", result)
         if result:
             results.append(result)
-        control = test_proteins(control_proteins, control_homologs, test_specie)
-        if control:
-            control_results.append(control)
+        # control = test_proteins(control_proteins, control_homologs, test_specie)
+        # if control:
+        #     control_results.append(control)
 
     print('Proteins:')
     for protein in proteins:
@@ -589,7 +679,7 @@ def get_top_proteins_and_validate(proteins_num, window=None):
     print_table(results, columns=('Test Species', 'Predicted', 'Expected'))
     accuracy = len([x for x in results if x[1] == x[2]])/len(results)
     print('Prediction accuracy:', accuracy)
-    print("Control: ", len([x for x in control_results if x[1] == x[2]])/len(control_results))
+    # print("Control: ", len([x for x in control_results if x[1] == x[2]])/len(control_results))
     return accuracy, proteins
 
 
