@@ -1,171 +1,31 @@
+import csv
 import logging
 import os
-import random
 import shutil
 import subprocess
 import sys
-import tempfile
-import time
 
-from multiprocessing import Pool
 from os.path import join
 
-from Bio.Blast.Applications import NcbiblastpCommandline
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from ncbi.datasets import GenomeApi
 from ncbi.datasets.openapi import ApiClient as DatasetsApiClient
 from ncbi.datasets.openapi import ApiException as DatasetsApiException
-from ncbi.datasets.package import dataset
+# from ncbi.datasets.package import dataset
 
-from ncbi.datasets.openapi.model.v1_assembly_dataset_request import V1AssemblyDatasetRequest
 from ncbi.datasets.openapi.model.v1_annotation_for_assembly_type import V1AnnotationForAssemblyType
 
-from storage import SEQUENCES_DIR, get_diamond_db_filename, get_protein_filename
+from storage import SEQUENCES_DIR, get_diamond_db_filename, get_sequences_filename
+from storage import get_mmseqs_db_filename
+from storage import get_mmseqs_alignment_db_filename
+from storage import get_mmseqs_results_filename
 from storage import get_dataset_filename
-from safe_blat_parser import SafeBlatParser
-from psl import parse_psl
+from storage import TMP_DIR
 
-def blast_protein(arg):
-    """
-    Takes a tuple of (protein_id, protein_seq, specie2_id) and finds the most
-    similar protein in specie2, givinig the identity score between the two.
-    protein_id - NCBI ref id of the protein in specie1
-    protein_seq - the amino acid sequence of the protein in specie1
-    specie2_id - the accession number of the specie2 genome assembly that will
-                 be used to search for a correspondent protein
-    Returns the tuple (protein_id, matched_protein_id, identity_score)
-    """
-    id, protein, specie2 = arg
-    with tempfile.NamedTemporaryFile() as f:
-        f.write(bytes(protein, 'utf-8'))
-        f.flush()
-        cline = NcbiblastpCommandline(query=f.name, db=specie2 + '.faa',
-                                    remote=False, num_alignments=1,
-                                    word_size=6,
-                                    matrix='BLOSUM62', evalue=10,
-                                    gapopen=11, gapextend=1,
-                                    outfmt='10')
-
-        result = cline()[0]
-        if not result:
-            logging.info('%s %s %s', id, None, 0.0)
-            return id, None, 0.0
-        matched_protein_id, identity = result.split(',')[1:3]
-        logging.info('%s %s %s', id, matched_protein_id, identity)
-        return id, matched_protein_id, identity
-
-
-def blast_protein_batch(args):
-    """
-    """
-    prot_fasta_name, specie2 = args
-    cmd = NcbiblastpCommandline(query=prot_fasta_name, db=specie2 + '.faa',
-                                remote=False, num_alignments=1,
-                                word_size=6,
-                                matrix='BLOSUM62', evalue=10,
-                                gapopen=11, gapextend=1,
-                                outfmt='10')
-
-    raw_result = cmd()[0]
-    result = [line.split(',') for line in raw_result.split('\n')]
-    return result
-
-
-def get_protein_correspondence_table_blast(specie1, specie2, subset=False):
-    """
-    Takes the acession ids of two species and returns a
-    protein correspondence table and an average identity score.
-    The correspondence table contains records of the following type:
-    (protein_id, matched_protein_id, identity_score)
-    """
-    correspondences = []
-    specie1_prot_fasta = specie1 + '.faa'
-    with open(specie1_prot_fasta) as handle:
-        proteins = []
-        for header, protein in SimpleFastaParser(handle):
-            id = header.split(' ')[0]
-            proteins.append((id, protein, specie2))
-        if subset:
-            proteins = random.sample(proteins, subset)
-        with Pool() as p:
-            results = p.map(blast_protein, proteins)
-        for id, matched_id, identity in results:
-            correspondences.append((id, matched_id, identity))
-    avg_identity = sum(float(c[2]) for c in correspondences)/len(correspondences)
-    return correspondences, avg_identity
-
-
-def get_protein_correspondence_table_batched_blast(specie1, specie2, processes=16, subset=False):
-    """
-    Takes the acession ids of two species and returns a
-    protein correspondence table and an average identity score.
-    The correspondence table contains records of the following type:
-    (protein_id, matched_protein_id, identity_score)
-    """
-    specie1_prot_fasta = specie1 + '.faa'
-
-    part_files = [tempfile.NamedTemporaryFile() for i in range(processes)]
-
-    try:
-        with open(specie1_prot_fasta) as handle:
-            proteins = []
-            i = 0
-            for header, protein in SimpleFastaParser(handle):
-                part_files[i].write(bytes(header, 'utf-8'))
-                part_files[i].write(bytes(protein, 'utf-8'))
-                i += 1
-                if i == processes:
-                    i = 0
-
-        for file in part_files:
-            file.flush()
-
-        with Pool() as p:
-            results = p.map(blast_protein_batch, [(f.name, specie2) for f in part_files])
-
-        correspondences = []
-        total_sum = 0
-        for batch in results:
-            for line in batch:
-                correspondences.append(line)
-                total_sum += float(line[2])
-        avg_identity = total_sum/len(correspondences)
-        return correspondences, avg_identity
-    finally:
-        for f in part_files:
-            f.close()
-
-
-def blat_proteins(specie1, specie2, reverse=False):
-    specie1_file = get_protein_filename(specie1)
-    specie2_file = get_protein_filename(specie2)
-
-    results_file = specie1 + '_' + specie2 + '.psl'
-
-    # execute blat as a subprocess
-    cmd = ['blat', '-prot', specie2_file, specie1_file, results_file]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    # parse the output of blat and get a correspondence_table
-    df = parse_psl(results_file)
-
-    correspondences = {}
-    for row in df.iterrows():
-        rowdata = row[1]
-        key = (rowdata['qname'], rowdata['tname'])
-        if reverse:
-            key = (rowdata['tname'], rowdata['qname'])
-        correspondences[key] = rowdata['identity']
-
-    # Delete the psl file
-    if os.path.exists(results_file):
-        os.remove(results_file)
-
-    return correspondences
 
 def diamond_align(specie1, specie2, reverse=False, sensitivity='sensitive'):
-    specie1_file = get_protein_filename(specie1)
-    specie2_file = get_protein_filename(specie2)
+    specie1_file = get_sequences_filename(specie1)
+    specie2_file = get_sequences_filename(specie2)
 
     # prepare diamond-formatted DB file for specie2 if missing
     specie2_db_file = get_diamond_db_filename(specie2)
@@ -195,67 +55,133 @@ def diamond_align(specie1, specie2, reverse=False, sensitivity='sensitive'):
 
     return correspondences
 
-def add_missing_proteins_to_correspondences(correspondences, specie1, specie2):
+
+def make_mmseqs_db(input, output):
+    if not os.path.isfile(output):
+        makedb = ['mmseqs', 'createdb', input, output]
+        subprocess.run(makedb, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def mmseqs_align(species1, species2, reverse=False, sensitivity='sensitive'):
+    print('Aligning {} to {}'.format(species1, species2))
+    species1_file = get_sequences_filename(species1)
+    species2_file = get_sequences_filename(species2)
+
+    # prepare mmseqs-formatted DB files for species1 if missing
+    species1_db = get_mmseqs_db_filename(species1)
+    print(species1_file)
+    print(species1_db)
+    make_mmseqs_db(species1_file, species1_db)
+
+    # prepare mmseqs-formatted DB files for species2 if missing
+    species2_db = get_mmseqs_db_filename(species2)
+    make_mmseqs_db(species2_file, species2_db)
+
+    alignment_db = get_mmseqs_alignment_db_filename(species1, species2)
+
+    # execute mmseqs as a subprocess
+    cmd = """
+    mmseqs search --search-type 3
+                  {query}
+                  {target}
+                  {alignment}
+                  {tmp}
+    """.format(query=species1_db, target=species2_db, alignment=alignment_db, tmp=TMP_DIR)
+    subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    result_file = get_mmseqs_results_filename(species1, species2)
+
+    cmd = """
+    mmseqs createtsv {query} {target} {alignment} {result}
+    """.format(query=species1_db, target=species2_db, alignment=alignment_db, result=result_file)
+    subprocess.run(cmd.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # parse the output of mmseqs and get a homologs table
+    homologs = {}
+    with open(result_file) as csvfile:
+        reader = csv.reader(csvfile, delimiter='\t')
+        for row in reader:
+            query, hit, _ , identity = row[:4]
+            key = (query, hit)
+            if reverse:
+                key = (hit, query)
+            homologs[key] = float(identity)
+
+    return homologs
+
+
+def add_missing_homologs(homologs, specie1, specie2):
     """
-    Adds proteins that are not already present in the correspondences table.
+    Adds sequences that are not already present in the homologs table.
     """
-    all_specie1_proteins = {row[0] for row in correspondences}
-    with open(get_protein_filename(specie1)) as handle:
+    all_specie1_seqs = {row[0] for row in homologs}
+    with open(get_sequences_filename(specie1)) as handle:
         for header, _ in SimpleFastaParser(handle):
             id = header.split(' ')[0]
-            if id not in all_specie1_proteins:
-                correspondences.append((id, None, 0))
+            if id not in all_specie1_seqs:
+                homologs.append((id, None, 0))
 
-    # all_specie2_proteins = {row[1] for row in correspondences}
-    # with open(get_protein_filename(specie2)) as handle:
+    # all_specie2_seqs = {row[1] for row in homologs}
+    # with open(get_sequences_filename(specie2)) as handle:
     #     for header, _ in SimpleFastaParser(handle):
     #         id = header.split(' ')[0]
-    #         if id not in all_specie2_proteins:
-    #             correspondences.append((None, id, 0))
+    #         if id not in all_specie2_seqs:
+    #             homologs.append((None, id, 0))
 
 
-def get_protein_correspondence_table(specie1, specie2, sensitivity):
+def get_homologs_table(specie1, specie2, sensitivity, genome):
     """
     Takes the acession ids of two species and returns a
-    protein correspondence table and an average identity percentage.
-    The correspondence table contains records of the following type:
-    (specie1_protein_id, specie2_protein_id, identity)
+    homolog table and an average identity percentage.
+    The homolog table contains records of the following type:
+    (specie1_seq_id, specie2_seq_id, identity)
     """
-    # Search specie1 proteins in specie2's proteome
-    correspondences_forw = diamond_align(specie1, specie2, sensitivity=sensitivity)
-    # Search specie2 proteins in specie1's proteome
-    # correspondences_back = blat_proteins(specie2, specie1, reverse=True)
+    aligner = mmseqs_align if genome else diamond_align
+    # Search specie1 sequences in specie2's genome/proteome
+    homologs_forw = aligner(specie1, specie2, sensitivity=sensitivity)
+    # Search specie2 sequences in specie1's genome/proteome
+    # homologs_back = aligner(specie2, specie1, reverse=True)
 
-    correspondences = []
+    homologs = []
     total_sum = 0
     # # Merge the two results into a single table
-    # all_pairs = set(correspondences_forw.keys()).union(correspondences_back.keys())
+    # all_pairs = set(homologs_forw.keys()).union(homologs_back.keys())
     # for pair in all_pairs:
-    #     score = correspondences_forw.get(pair, correspondences_back.get(pair))
-    #     if pair in correspondences_forw and pair in correspondences_back:
+    #     score = homologs_forw.get(pair, homologs_back.get(pair))
+    #     if pair in homologs_forw and pair in homologs_back:
     #         # Should be the same in both places, but just in case
-    #         score = (correspondences_forw[pair] + correspondences_back[pair])/2
-    #     correspondences.append((pair[0], pair[1], score))
+    #         score = (homologs_forw[pair] + homologs_back[pair])/2
+    #     homologs.append((pair[0], pair[1], score))
     #     total_sum += score
 
-    for pair in correspondences_forw:
-        identity = correspondences_forw[pair]
-        correspondences.append((pair[0], pair[1], identity))
+    for pair in homologs_forw:
+        identity = homologs_forw[pair]
+        homologs.append((pair[0], pair[1], identity))
         total_sum += identity
 
-    # if there are proteins in specie1 that don't have a match in specie2 or vice versa,
+    # if there are sequences in specie1 that don't have a match in specie2 or vice versa,
     # add them to the table with a score of 0.
-    add_missing_proteins_to_correspondences(correspondences, specie1, specie2)
+    add_missing_homologs(homologs, specie1, specie2)
 
-    avg_identity = total_sum/len(correspondences)
+    avg_identity = total_sum/len(homologs)
 
-    return correspondences, avg_identity
+    return homologs, avg_identity
 
 
-def download_dataset(accession):
+def download_dataset(accession, sequence_type="protein"):
     """
     Downloads the protein fasta file for the genome assembly with the given accession number.
+
+    Arguments:
+    accession -- species' accession number
+
+    Keyword arguments:
+    sequence_type -- protein/gene (default: protein)
     """
+    if sequence_type not in ('protein', 'gene'):
+        raise ValueError(
+            'sequence_type must be "protein" or "gene". Got {}'.format(sequence_type))
+
     zipfile_name = get_dataset_filename(accession)
 
     # Check if zipfile_name already exists, skipping the download if it does.
@@ -270,10 +196,12 @@ def download_dataset(accession):
     with DatasetsApiClient() as api_client:
         genome_api = GenomeApi(api_client)
         try:
+            annotation_type = 'CDS_FASTA' if sequence_type == 'gene' else 'PROT_FASTA'
+            exclude_genome = sequence_type == 'protein'
             gene_dataset_download = genome_api.download_assembly_package(
                 [accession],
-                include_annotation_type=[V1AnnotationForAssemblyType("PROT_FASTA")],
-                exclude_sequence=True,
+                include_annotation_type=[V1AnnotationForAssemblyType(annotation_type)],
+                exclude_sequence=exclude_genome,
                 filename=zipfile_name,
                 _preload_content=False,
             )
@@ -284,29 +212,27 @@ def download_dataset(accession):
             sys.exit(f"Exception when calling GeneApi: {e}\n")
 
 
-def get_protein_from_dataset(accession):
-    """
-    Extracts the protein fasta file from the dataset with the given accession number.
-    """
-    zipfile_name = get_dataset_filename(accession)
-
-    # open the package zip archive so we can retrieve files from it
-    package = dataset.GeneDataset(zipfile_name)
-
-    # TODO: check why we can have more than one file and what to do with it
-    return package.get_files_by_type("PROTEIN_FASTA")[0]
-
-
-def extract_protein_data(accession):
+def extract_sequence_data(accession, sequence_type):
     """
     Checks if the archive with data for a genome is already
-    downloaded and contains protein data. If it does, it will
-    extract the archive and return the path to the protein file.
+    downloaded and contains sequence data of the given type.
+    If it does, it will extract the archive and return the
+    path to the sequences file.
+
+    Arguments:
+    accession     -- species' accession number
+    sequence_type -- type of sequence data. Should be "protein" or "gene".
     """
-    protein_target_filepath = get_protein_filename(accession)
+    if sequence_type == 'protein':
+        file_type = 'PROTEIN_FASTA'
+    else:
+        # file_type = 'GENOMIC_NUCLEOTIDE_FASTA'
+        file_type = 'CDS_NUCLEOTIDE_FASTA'
+
+    sequences_target_filepath = get_sequences_filename(accession)
 
     # If the data is already extracted, do nothing
-    if os.path.isdir(protein_target_filepath):
+    if os.path.isdir(sequences_target_filepath):
         return
 
     # If the data is not downloaded, do nothing
@@ -314,10 +240,11 @@ def extract_protein_data(accession):
     if not os.path.isfile(zipfile):
         return
 
-    # Don't extract if there is no protein data
+    # Don't extract if there is no sequence data
     package = dataset.GeneDataset(zipfile)
-    protein_files = package.get_file_names_by_type("PROTEIN_FASTA")
-    if len(protein_files) == 0:
+    sequence_files = package.get_file_names_by_type(file_type)
+    print(sequence_files)
+    if len(sequence_files) == 0:
         return
 
     tmp_dir = join(SEQUENCES_DIR, 'tmp')
@@ -325,7 +252,10 @@ def extract_protein_data(accession):
     shutil.unpack_archive(zipfile, tmp_dir, format='zip')
 
     # move the extracted data to the sequence directory
-    src = join(tmp_dir, 'ncbi_dataset', 'data', accession, 'protein.faa')
+    # src = join(tmp_dir, 'ncbi_dataset', 'data', accession)
+    # TODO: check if we may have more than one file
+    local_path = next(file for file in sequence_files if file.startswith(accession))
+    src = join(tmp_dir, 'ncbi_dataset', 'data', local_path)
     dest = join(SEQUENCES_DIR, accession + '.faa')
     shutil.move(src, dest)
 
@@ -333,12 +263,12 @@ def extract_protein_data(accession):
     shutil.rmtree(tmp_dir)
 
 
-def has_protein_data(accession):
+def has_sequence_data(accession):
     """
-    Checks if the protein fasta file for the given accession is available.
+    Checks if the sequence fasta file for the given accession is available.
     """
-    prot_fasta = get_protein_filename(accession)
-    return os.path.isfile(prot_fasta)
+    fasta = get_sequences_filename(accession)
+    return os.path.isfile(fasta)
 
 
 def get_protein_sequence(protein, species):
@@ -347,9 +277,9 @@ def get_protein_sequence(protein, species):
     and returns the sequence for the protein as found in the
     local sequences storage.
     """
-    fasta_file = get_protein_filename(species)
+    fasta_file = get_sequences_filename(species)
     with open(fasta_file) as handle:
         for header, sequence in SimpleFastaParser(handle):
-            if header.split()[0] == protein:
+            if protein in header:
                 return sequence
     return None

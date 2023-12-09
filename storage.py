@@ -2,16 +2,18 @@ import csv
 import os
 
 import pandas as pd
+import numpy as np
 
 from os.path import join
 
-from ncbi.datasets.package import dataset
+# from ncbi.datasets.package import dataset
 
 
 DATA_DIR = 'data'
 CORRESPONDENCES_DIR = join(DATA_DIR, 'correspondences')
 SEQUENCES_DIR = join(DATA_DIR, 'sequences')
 DOWNLOADED_DATA_DIR = join(SEQUENCES_DIR, 'downloads')
+TMP_DIR = join(DATA_DIR, 'tmp')
 
 
 def read_protein_correspondences(filename):
@@ -50,12 +52,24 @@ def get_dataset_filename(accession):
     return join(DOWNLOADED_DATA_DIR, accession + '.faa.zip')
 
 
-def get_protein_filename(accession):
+def get_sequences_filename(accession):
     return join(SEQUENCES_DIR, accession + '.faa')
 
 
 def get_diamond_db_filename(accession):
     return join(SEQUENCES_DIR, accession + '.dmnd')
+
+
+def get_mmseqs_db_filename(accession):
+    return join(DATA_DIR, 'mmseqs_dbs', accession)
+
+
+def get_mmseqs_alignment_db_filename(accession1, accession2):
+    return join(TMP_DIR, 'alignments', accession1 + '_' + accession2)
+
+
+def get_mmseqs_results_filename(accession1, accession2):
+    return join(TMP_DIR, 'alignments', accession1 + '_' + accession2 + '.tsv')
 
 
 def read_correspondences():
@@ -82,8 +96,8 @@ def read_correspondences_df():
             species1, species2 = filename.rstrip('.csv').split('-')
             df = pd.read_csv(join(CORRESPONDENCES_DIR, filename))
             row_count = df.shape[0]
-            df['species1'] = [species1] * row_count
-            df['species2'] = [species2] * row_count
+            df['species1'] = np.repeat(species1, row_count)
+            df['species2'] = np.repeat(species2, row_count)
             correspondences_dfs.append(df)
     merged = pd.concat(correspondences_dfs)
     return merged.reset_index()

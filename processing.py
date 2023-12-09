@@ -3,8 +3,8 @@ import os
 
 from genomes import get_accessions
 
-from proteins import download_dataset, extract_protein_data, has_protein_data
-from proteins import get_protein_correspondence_table
+from proteins import download_dataset, extract_sequence_data, has_sequence_data
+from proteins import get_homologs_table
 from storage import CORRESPONDENCES_DIR, SEQUENCES_DIR, get_genome_pair_filename, save_protein_correspondences
 from taxonomy import get_species_in_taxon_subtree
 from utils import print_table
@@ -39,7 +39,7 @@ def get_genome_pairs_for_processing(genomes, overwrite=False):
     return {pair for pair in genome_combinations if pair not in processed_genome_pairs}
 
 
-def download_data_for_genomes(genomes):
+def download_sequences_data(accessions, genome=False):
     """
     Downloads data for the given genomes.
     """
@@ -47,16 +47,16 @@ def download_data_for_genomes(genomes):
     for filename in os.listdir(SEQUENCES_DIR):
         if filename.endswith('.faa.zip'):
             downloaded_data.add(filename)
-    for genome in genomes:
-        if genome + '.faa.zip' not in downloaded_data:
-            logging.info('Downloading data for {}'.format(genome))
-            download_dataset(genome)
+    for accession in accessions:
+        if accession + '.faa.zip' not in downloaded_data:
+            logging.info('Downloading data for {}'.format(accession))
+            download_dataset(accession, genome)
             
             
-def create_correspondance_table(specie1, specie2, sensitivity):
-    correspondences, avg_identity = get_protein_correspondence_table(specie1, specie2, sensitivity)
+def create_homologs_table(specie1, specie2, sensitivity, genome):
+    homologs, avg_identity = get_homologs_table(specie1, specie2, sensitivity, genome)
     filename = get_genome_pair_filename(specie1, specie2)
-    save_protein_correspondences(correspondences, filename)
+    save_protein_correspondences(homologs, filename)
     print('Average identity for {}-{}: {}'.format(specie1, specie2, avg_identity), flush=True)
     logging.info('Average identity for {}-{}: {}'.format(specie1, specie2, avg_identity))
 
@@ -68,21 +68,22 @@ def align(args):
     accessions = get_accessions(specie_taxons)
 
     print("Downloading data for {} genomes...".format(len(accessions)))
-    download_data_for_genomes(accessions.values())
+    sequence_type = 'gene' if args.genome else 'protein'
+    download_sequences_data(accessions.values(), sequence_type)
 
     status_table = []
-    prot_assemblies = []
-    # extract the datasets to get the protein fasta files
-    # and filter out the accessions that don't have protein data
+    assemblies = []
+    # extract the datasets to get the sequence fasta files
+    # and filter out the accessions that don't have sequence data
     for taxon_id, taxon_name, taxon_rank in specie_taxons:
         accession = accessions.get(taxon_id)
         if accession:
-            extract_protein_data(accession)
-            if has_protein_data(accession):
-                prot_assemblies.append(accession)
+            extract_sequence_data(accession, sequence_type)
+            if has_sequence_data(accession):
+                assemblies.append(accession)
                 status_table.append((taxon_id, taxon_name, taxon_rank, accession, 'OK'))
             else:
-                logging.warning('No protein data for {}'.format(accession))
+                logging.warning('No sequence data for {}'.format(accession))
                 status_table.append((taxon_id, taxon_name, taxon_rank, accession, 'N/A'))
         else:
             status_table.append((taxon_id, taxon_name, taxon_rank, 'N/A', 'N/A'))
@@ -91,25 +92,25 @@ def align(args):
         additional_genomes = args.additional_genomes.split(',')
         print('Got {} additional genomes'.format(len(additional_genomes)))
         for accession in additional_genomes:
-            extract_protein_data(accession)
-            if has_protein_data(accession):
-                prot_assemblies.append(accession)
+            extract_sequence_data(accession, sequence_type)
+            if has_sequence_data(accession):
+                assemblies.append(accession)
                 status_table.append(('', '', '', accession, 'OK'))
             else:
-                logging.warning('No protein data for {}'.format(accession))
+                logging.warning('No sequence data for {}'.format(accession))
                 status_table.append(('', '', '', accession, 'N/A'))
 
     status_table.sort(key=lambda x: x[1])
 
     print_table(status_table, columns=('Taxon', 'Name', 'Rank', 'Accession', 'Protein'))
 
-    print('Got {} accessions with protein data in their assembly'.format(len(prot_assemblies)))
-    logging.info('Got {} accessions with protein data in their assembly'.format(len(prot_assemblies)))
+    print('Got {} accessions with sequence data in their assembly'.format(len(assemblies)))
+    logging.info('Got {} accessions with sequence data in their assembly'.format(len(assemblies)))
 
-    genome_pairs = get_genome_pairs_for_processing(prot_assemblies, args.overwrite)
+    genome_pairs = get_genome_pairs_for_processing(assemblies, args.overwrite)
 
     logging.info('Got {} genome pairs for processing'.format(len(genome_pairs)))
     print('Got {} genome pairs for processing'.format(len(genome_pairs)))
 
     for specie1, specie2 in genome_pairs:
-        create_correspondance_table(specie1, specie2, args.sensitivity)
+        create_homologs_table(specie1, specie2, args.sensitivity, args.genome)

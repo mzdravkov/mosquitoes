@@ -22,7 +22,7 @@ def get_best_available_assembly(assemblies):
         'assembly_category': 'representative genome',
         'assembly_level': 'Chromosome',
     }
-    
+
     for criterion, value in criteria.items():
         for assembly in assemblies:
             if assembly['assembly'].get(criterion) == value:
@@ -38,7 +38,7 @@ def get_accessions(taxons):
     genome_client = GenomeApi()
     accessions = {}
     for taxon, _, _ in taxons:
-        descriptors = genome_client.assembly_descriptors_by_taxon(taxon)
+        descriptors = genome_client.assembly_descriptors_by_taxon(str(taxon))
         err = genome_assembly_metadata_fetch_has_error(descriptors)
         if err:
             logging.error('ERROR when getting taxon assembly: {} ({})'.format(taxon, err['message']))

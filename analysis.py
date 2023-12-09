@@ -1,10 +1,19 @@
 import random
 import statistics
 
+from os import listdir
+from os.path import isfile, join
+import re
 import time
 import numpy as np
 import pandas as pd
+import swifter
 import dask.dataframe as dd
+from dask.distributed import Client, LocalCluster
+import pickle
+import functools
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 
 from collections import defaultdict
 from functools import lru_cache
@@ -14,7 +23,7 @@ import subprocess
 import tempfile
 import pprint
 
-from sklearn.metrics import silhouette_score
+# from sklearn.metrics import silhouette_score
 import networkx as nx
 from proteins import get_protein_sequence
 
@@ -57,22 +66,33 @@ from Bio.Align.AlignInfo import SummaryInfo
 SPECIES_ANTHROPOPHILY = {
 'GCA_000441895.2': -1.0, # Anopheles sinensis [Ree, Han-Il, et al. 2001][PMC2712014]
 'GCF_000005575.2': 1.0, # Anopheles gambiae str. PEST [takken (PMC4381365)]
+'GCF_002204515.2': 1.0, # Aedes aegypti [McMeniman 2011]
 'GCF_006496715.1': 1.0, # Aedes albopictus [Alongkot Ponlawat 2005]
+'GCF_006496715.2': 1.0, # Asian tiger mosquito (Aedes albupictus) [Alongkot Ponlawat 2005]
 'GCF_013141755.1': -1.0, # Anopheles stephensi [Thomas, S., Ravishankaran 2017]
 'GCF_013758885.1': -1.0, # Anopheles albimanus [Bruce-Chwatt 1966 (PMC2476083)]
 'GCF_015732765.1': -1.0, # Culex quinquefasciatus [takken (PMC4381365)]
+'GCF_016801865.1': -1.0, # Culex pipiens pallens [Joaquín Muñoz 2011]
 'GCF_016801865.2': -1.0, # Culex pipiens pallens [Joaquín Muñoz 2011]
 'GCF_016920715.1': -1.0, # Anopheles arabiensis [tekken (PMC4381365)]
 'GCF_017562075.2': -1.0, # Anopheles merus [Pamela C Kipyab 2013]
+'GCF_029784135.1': -1.0, # Toxorhynchites rutilus septentrionalis [the whole genus doesn't consume blood]
+'GCF_029784155.1': -1.0, # Uranotaenia lowii [Reeves & Holderman 2018]
+'GCF_029784165.1': -1.0, # pitcher-plant mosquito (Wyeomyia smithii)
+# 'GCF_030247185.1': , # Malaya genurostris
+# 'GCF_030247195.1': , # Topomyia yanbarensis
 'GCF_943734635.1': 1.0, # Anopheles cruzii [Kirchgatter 2014, Santos 2019]
 'GCF_943734655.1': 1.0, # Sabethes cyaneus [Leticia Smith 2023]
 'GCF_943734665.1': 1.0, # Anopheles aquasalis
 'GCF_943734685.1': 1.0, # Anopheles coluzzii [Martin C. Akogbéto 2018]
 'GCF_943734695.1': 1.0, # Anopheles maculipalpis
+# 'GCF_943734705.1': , # Anopheles coustani
 'GCF_943734725.1': 1.0, # Anopheles marshallii [Boris Makanga 2016]
 'GCF_943734745.1': 1.0, # Anopheles darlingi [Marta Moreno 2017]
 'GCF_943734755.1': 1.0, # Anopheles moucheti [Sinka 2010]
+# 'GCF_943734765.1': , # Anopheles ziemanni
 'GCF_943734845.2': 1.0, # Anopheles funestus [tekken (PMC4381365)]
+# 'GCF_943735745.2': , # Anopheles bellator
 'GCF_943737925.1': 1.0, # Anopheles nili [Antonio-Nkondjio 2013 (Anopheles mosquitoes book)]
 }
 
@@ -275,6 +295,33 @@ def check_species_conflict(gene, genome, protein_species):
         )
 
 
+@lru_cache(maxsize=None)
+def get_scored_corrospondences():
+    correspondences = read_correspondences_df()
+    avg_species_scores = correspondences \
+                            .groupby(['species1', 'species2']) \
+                            .mean('identity') \
+                            .to_dict()['identity']
+
+    get_species_score = np.vectorize(lambda s1, s2: avg_species_scores[(s1, s2)])
+
+    correspondences['avg_species_score'] = get_species_score(
+        correspondences.species1,
+        correspondences.species2
+    )
+
+    calc_relevance = np.vectorize(
+        lambda genes_score, species_score, s1, s2: calculate_relevance(
+            genes_score, species_score, SPECIES_ANTHROPOPHILY[s1], SPECIES_ANTHROPOPHILY[s2]))
+
+    ddata = dd.from_pandas(correspondences, npartitions=16)
+    correspondences['relevance'] = ddata.map_partitions(
+        lambda df_part: calc_relevance(df_part.identity, df_part.avg_species_score, df_part.species1, df_part.species2),
+        meta=pd.Series(dtype='float', name='relevance')
+    ).compute(scheduler='processes')
+
+    return correspondences
+
 
 @lru_cache(maxsize=None)
 def top_by_relevance_pandas(n, test_species=None):
@@ -284,40 +331,22 @@ def top_by_relevance_pandas(n, test_species=None):
     If given a test_species it will ignore this species from the
     analysis so that it can be used to test the results.
     """
+    global correspondences
+    t = time.time()
     print('Test species:', test_species)
-    correspondences = read_correspondences_df()
+    correspondences = get_scored_corrospondences()
 
+    print('finished reading correspondences')
     non_test = (correspondences['species1'] != test_species) \
                 & (correspondences['species2'] != test_species)
     train_correspondences = correspondences[non_test].copy()
 
+    print('filtered train')
     test_correspondences = correspondences[~non_test].copy()
     test_correspondences.dropna()
     test_correspondences = test_correspondences[test_correspondences['specie2_protein_id'].notna()]
     test_homologs = {k: list(zip(v['specie2_protein_id'], v['species2']))
                      for k, v in test_correspondences.groupby('specie1_protein_id')}
-
-    avg_species_scores = train_correspondences \
-                            .groupby(['species1', 'species2']) \
-                            .mean('identity') \
-                            .to_dict()['identity']
-
-    get_species_score = np.vectorize(lambda s1, s2: avg_species_scores[(s1, s2)])
-
-    train_correspondences['avg_species_score'] = get_species_score(
-        train_correspondences.species1,
-        train_correspondences.species2
-    )
-
-    calc_relevance = np.vectorize(
-        lambda genes_score, species_score, s1, s2: calculate_relevance(
-            genes_score, species_score, SPECIES_ANTHROPOPHILY[s1], SPECIES_ANTHROPOPHILY[s2]))
-
-    ddata = dd.from_pandas(train_correspondences, npartitions=32)
-    train_correspondences['relevance'] = ddata.map_partitions(
-        lambda df_part: calc_relevance(df_part.identity, df_part.avg_species_score, df_part.species1, df_part.species2),
-        meta=pd.Series(dtype='float', name='relevance')
-    ).compute(scheduler='processes')
 
     prots = train_correspondences[['specie1_protein_id', 'relevance', 'species1']] \
                 .groupby('specie1_protein_id') \
@@ -334,11 +363,13 @@ def top_by_relevance_pandas(n, test_species=None):
     prots_to_homologs = prots.join(homologies.set_index('specie1_protein_id')) \
                      .join(prots, on='specie2_protein_id', rsuffix='_2')
     prots_to_homologs.index.name = 'prot'
+    print('before rank_summed')
 
     rank_summed = prots_to_homologs.groupby('prot').agg({'srank_2': 'sum', 'species_2': 'count'})
     rank_summed['srank_2'] += prots['srank']
     rank_summed.columns = ['rank_sum', 'count']
-    relevant = rank_summed[rank_summed['count'] > (len(SPECIES_ANTHROPOPHILY)-1)/3]
+    # relevant = rank_summed[rank_summed['count'] > (len(SPECIES_ANTHROPOPHILY)-1)/3].copy()
+    relevant = rank_summed[rank_summed['count'] > len(SPECIES_ANTHROPOPHILY)/2].copy()
     relevant['mean_rank'] = rank_summed['rank_sum'] / rank_summed['count']
     relevant.sort_values('mean_rank', ascending=True, inplace=True)
 
@@ -352,6 +383,7 @@ def top_by_relevance_pandas(n, test_species=None):
     homologs = {prot: homologs + test_homologs.get(prot, [])
                 for prot, homologs in top_prots_homologs.items()}
 
+    print('finished top_by_relevance_panda:', time.time() - t)
     return top_prots, homologs
 
 
@@ -609,7 +641,7 @@ def test_proteins(proteins, homologs, test_species=None):
             group_scores[best_group] += 1
 
             print('No homolog for protein {} in test specie {}'.format(protein, test_species))
-            print('Using an alteranative strategy to pick best group: ', best_group)
+            print('Using an alternative strategy to pick best group: ', best_group)
             continue
 
         test_homolog_seq = get_protein_sequence(test_homolog, test_species)
@@ -805,3 +837,335 @@ def avg_score_for_phenotypic_groups():
             print('Average score of pairs between group {} and {}: {}'.format(g1, g2, sum(scores)/len(scores)))
 
     print('Silhuette score:', get_clustering_silhouette_score())
+
+
+def create_graph(relevant_species):
+    path = './data/correspondences/'
+
+    files = [f for f in listdir(path) if isfile(join(path, f))]
+
+    g = nx.DiGraph()
+
+    all_species = set()
+    prot_to_species = {}
+    
+    prot_to_id = {}
+    id_to_prot = {}
+    id = 1
+
+    for file in files:
+        if not file.endswith('csv'):
+            continue
+        print(file)
+        species1, species2 = re.search(r'(.*)-(.*)\.csv', file).groups()
+        if species1 not in relevant_species or species2 not in relevant_species:
+            continue
+        all_species.add(species1)
+        all_species.add(species2)
+        corresondences = pd.read_csv(join(path, file)) 
+        # corresondences = corresondences[corresondences['identity'] > 0]
+        nodes = []
+        edges = []
+        for row in corresondences.iterrows():
+            prot1, prot2, ident = row[1]
+
+            if prot1 not in prot_to_id:
+                prot_to_species[prot1] = species1
+                prot_to_id[prot1] = id
+                id_to_prot[id] = prot1
+                nodes.append(id)
+                id += 1
+            
+            if prot2 != '':
+                if prot2 not in prot_to_id:
+                    prot_to_species[prot2] = species2
+                    prot_to_id[prot2] = id
+                    id_to_prot[id] = prot2
+                    nodes.append(id)
+                    id += 1
+                edges.append((prot_to_id[prot1], prot_to_id[prot2], {'identity': (100 - ident)/100.0}))
+
+            # nodes.append((prot1, {'species': species1}))
+            # nodes.append((prot2, {'species': species2}))
+        g.add_nodes_from(nodes)
+        g.add_edges_from(edges)
+        
+    return g, prot_to_species, id_to_prot, prot_to_id
+
+
+def percentage_complete(graph):
+    n = graph.number_of_nodes()
+    e = graph.number_of_edges()
+    return e / (n*(n-1))
+
+
+def compactness(graph):
+    return np.average([graph.get_edge_data(*pair)['identity'] for pair in graph.edges])
+
+
+def distance(subgraph1, subgraph2, graph):
+    weights = []
+    for n1 in subgraph1.nodes:
+        for n2 in subgraph2.nodes:
+            data = graph.get_edge_data(n1, n2)
+            if data:
+                ident = data['identity'] # if data else 0
+                weights.append(ident)
+    return np.average(weights)
+
+
+def calculate_score_for_ortholog_group(ortho_group):
+    try:
+        # genes = {gene: species.strip('.faa')
+        #          for species, genes in ortho_group[4:].items()
+        #          for gene in genes.split(',')}
+        # anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == 1]
+        # non_anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == -1]
+        
+        group_id, genes = ortho_group
+        anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == 1]
+        non_anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == -1]
+        subgraph = graph.subgraph(genes.keys())
+        modularity = nx.community.modularity(subgraph, [anthropophilic, non_anthropophilic], weight='identity')
+        # anthropophilic_subgraph = graph.subgraph(anthropophilic)
+        # non_anthropophilic_subgraph = graph.subgraph(non_anthropophilic)
+        # anthropophilic_compactness = compactness(anthropophilic_subgraph)
+        # non_anthropophilic_compactness = compactness(non_anthropophilic_subgraph)
+        # anthropophily_groups_distance = distance(anthropophilic_subgraph,
+        #                                          non_anthropophilic_subgraph,
+        #                                          graph)
+        # anthropophily_division_score = anthropophilic_compactness * non_anthropophilic_compactness / (anthropophily_groups_distance ** 2)
+
+        random_division_scores = []
+        for _ in range(100):
+            group1 = set(random.sample(genes.keys(), len(anthropophilic)))
+            group2 = genes.keys() - group1
+
+            # group1_subgraph = graph.subgraph(group1)
+            # group2_subgraph = graph.subgraph(group2)
+
+            # compactness1 = compactness(group1_subgraph)
+            # compactness2 = compactness(group2_subgraph)
+            # subgraphs_distance = distance(group1_subgraph, group2_subgraph, graph)
+            # agg_score = compactness1 * compactness2 / (subgraphs_distance ** 2)
+            # random_division_scores.append(agg_score)
+            random_modularity = nx.community.modularity(subgraph, (group1, group2), weight='identity')
+            random_division_scores.append(random_modularity)
+
+        mean_rand_division_score = np.average(random_division_scores)
+        std = np.std(random_division_scores)
+
+        # get how many standard deviations from the mean the anthropophily_division_score is
+        # zscore = (anthropophily_division_score - mean_rand_division_score) / std
+        zscore = (modularity - mean_rand_division_score) / std
+        
+        return group_id, zscore
+    except Exception as e:
+        print(e)
+
+
+# def predict_anthropophily_orthologs_parallel(ortholog_groups, graph, zscore_threshold=3):
+def predict_anthropophily_orthologs_parallel(ortholog_groups, zscore_threshold=3):
+    print('Starting parallel prediction')
+    # with ProcessPoolExecutor(max_workers=4) as executor:
+    #     # results = executor.map(functools.partial(calculate_score_for_ortholog_group, train_graph),
+    #     results = executor.map(calculate_score_for_ortholog_group,
+    #                            [x for _, x in ortholog_groups.iterrows()])
+    with mp.Pool(processes=2) as p:
+        # print([x for _, x in ortholog_groups.iterrows()])
+        # results = p.map(functools.partial(calculate_score_for_ortholog_group, graph),
+        #                 [x for _, x in ortholog_groups.iterrows()])
+        #     # (x for _, x in ortholog_groups.iterrows()),
+        #                 # chunksize=len(ortholog_groups)//3)
+
+    # results = map(calculate_score_for_ortholog_group, [x for _, x in ortholog_groups.iterrows()])
+        results = p.map(calculate_score_for_ortholog_group, ortholog_groups)
+        results = pd.DataFrame(results, columns=('group_id', 'zscore')).sort_values('zscore', ascending=False)
+        return results
+        # return results[results['zscore'] >= zscore_threshold]
+
+
+def predict_anthropophily_orthologs(ortholog_groups, graph, zscore_threshold=3):
+    predicted_orthologs = []
+    i = 0
+    for _, ortho_group in ortholog_groups.iterrows():
+        i += 1
+        if i % 100 == 0:
+            print(i)
+        genes = {gene: species.strip('.faa') for species, genes in ortho_group[4:].items() for gene in genes.split(',')}
+        anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == 1]
+        non_anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == -1]
+        anthropophilic_subgraph = graph.subgraph(anthropophilic)
+        non_anthropophilic_subgraph = graph.subgraph(non_anthropophilic)
+        anthropophilic_compactness = compactness(anthropophilic_subgraph)
+        non_anthropophilic_compactness = compactness(non_anthropophilic_subgraph)
+        anthropophily_groups_distance = distance(anthropophilic_subgraph,
+                                                 non_anthropophilic_subgraph,
+                                                 graph)
+        anthropophily_division_score = anthropophilic_compactness * non_anthropophilic_compactness / (anthropophily_groups_distance ** 2)
+
+        random_division_scores = []
+        for _ in range(100):
+            group1 = set(random.sample(genes.keys(), len(anthropophilic)))
+            group2 = genes.keys() - group1
+
+            group1_subgraph = graph.subgraph(group1)
+            group2_subgraph = graph.subgraph(group2)
+
+            compactness1 = compactness(group1_subgraph)
+            compactness2 = compactness(group2_subgraph)
+            subgraphs_distance = distance(group1_subgraph, group2_subgraph, graph)
+            agg_score = compactness1 * compactness2 / (subgraphs_distance ** 2)
+            random_division_scores.append(agg_score)
+
+        mean_rand_division_score = np.average(random_division_scores)
+        std = np.std(random_division_scores)
+
+        # get how many standard deviations from the mean the anthropophily_division_score is
+        zscore = (anthropophily_division_score - mean_rand_division_score) / std
+        
+        if zscore > zscore_threshold:
+            predicted_orthologs.append((ortho_group['group_id'], zscore, genes))
+
+    return pd.DataFrame(predicted_orthologs, columns=['group_id', 'zscore', 'orthologs'])
+
+
+def get_one_ortholog_per_species(ortholog_group):
+    species_to_gene = {}
+    for gene, species in ortholog_group.items():
+        if species not in species_to_gene:
+            species_to_gene[species] = gene
+
+    return {gene: species for species, gene in species_to_gene.items()}
+
+
+def split_orthologs_train_test(orthologs, test_species):
+    train = {group_id: {gene: species for gene, species in orthologs.items() if species != test_species}
+             for group_id, orthologs in orthologs.items()}
+    test = {group_id: {gene: species for gene, species in orthologs.items() if species == test_species}
+             for group_id, orthologs in orthologs.items()}
+    return train, test
+    # train_orthologs = {}
+    # for gene, species in orthologs.items():
+    #     if species != test_species:
+    #         train_orthologs[gene] = species
+    #     else:
+    #         test_ortholog = gene
+    # return train_orthologs, test_ortholog
+
+
+def remove_species_from_graph(graph, species, prot_to_species, id_to_prot):
+    # to_keep = [node for node, data in graph.nodes(data=True) if data['species'] != species]
+    to_keep = [node for node in graph.nodes() if prot_to_species[id_to_prot[node]] != species]
+    return graph.subgraph(to_keep)
+
+
+def remove_test_species_from_ortholog_groups(ortho_group, test_species):
+    return {group_id: {gene: species for gene, species in orthologs.items() if species != test_species}
+            for group_id, orthologs in ortho_group.items()}
+
+graph = None
+
+def analyse_graph(ortholog_groups_file, top_n=11):
+    test_results = []
+    ortholog_groups = pd.read_csv(ortholog_groups_file, sep='\t')
+    # TODO: remove this line
+    ortholog_groups = ortholog_groups.drop('GCF_016801865.1.faa', axis=1)
+
+    # Use only the ortholog groups that have a representative protein in all species
+    ortholog_groups = ortholog_groups.replace('*', None)
+    common_ortho_groups = ortholog_groups.dropna()
+
+    relevant_species = common_ortho_groups.columns[4:]
+    relevant_species = {sp.strip('.faa') for sp in relevant_species}
+
+    # if isfile('homology_graph.pkl'):
+    #     print('Loading the homology graph from a pickled object')
+    #     graph = pickle.load(open('homology_graph.pkl', 'rb'))
+    # else:
+    #     print('Creating a homology graph')
+    #     graph, _ = create_graph(relevant_species)
+    #     pickle.dump(graph, open('homology_graph.pkl', 'wb'))
+    global graph
+    graph, prot_to_species, id_to_prot, prot_to_id = create_graph(relevant_species)
+    del prot_to_species
+    
+    print(f"Extracted {len(prot_to_id)} proteins from the correspondences")
+    
+    processed_ortho_groups = {}
+    for _, row in common_ortho_groups.iterrows():
+        genes = {prot_to_id[gene]: species.strip('.faa')
+                 for species, genes in row[4:].items()
+                 for gene in genes.split(',')
+                 if gene in prot_to_id} # TODO  why is if this necessary?
+        processed_ortho_groups[row['group_id']] = genes
+        # processed_ortho_groups.append((row['group_id'], genes))
+        
+    # common_ortho_groups_dask = dd.from_pandas(common_ortho_groups, npartitions=64)
+
+    ortholog_hist = defaultdict(lambda: 0)
+    for test_species in relevant_species:
+        # train_species = relevant_species - {test_species}
+        # train_graph = remove_species_from_graph(graph, test_species, prot_to_species, id_to_prot).copy()
+        # predicted_orthologs = predict_anthropophily_orthologs_parallel(common_ortho_groups, train_graph)
+        train_ortho_groups, test_ortho_groups = split_orthologs_train_test(processed_ortho_groups, test_species)
+        predicted_orthologs = predict_anthropophily_orthologs_parallel(train_ortho_groups.items())
+        predicted_orthologs = predicted_orthologs.sort_values('zscore', ascending=False).head(top_n)
+        print(predicted_orthologs)
+        for _, row in predicted_orthologs.iterrows():
+            ortholog_hist[row['group_id']] += 1
+
+        group_scores = defaultdict(lambda: 0)
+        for _, ortholog_group in predicted_orthologs.iterrows():
+            group_id = ortholog_group['group_id']
+            # orthologs = train_ortho_groups[ortholog_group['group_id']]
+            # one_ortholog_per_species = get_one_ortholog_per_species(orthologs)
+            # # translate the ids to protein names
+            # one_ortholog_per_species = {id_to_prot[id]: species
+            #                             for id, species in one_ortholog_per_species.items()}
+            # # train_orthologs, test_ortholog = split_orthologs_train_test(one_ortholog_per_species,
+            # #                                                             test_species)
+            
+            train_orthologs = get_one_ortholog_per_species(train_ortho_groups[group_id])
+            train_orthologs = {id_to_prot[id]: species for id, species in train_orthologs.items()}
+            test_ortholog = next((gene for gene in test_ortho_groups[group_id]))
+            test_ortholog = id_to_prot[test_ortholog]
+
+            test_ortholog_seq = get_protein_sequence(test_ortholog, test_species)
+            max_score = -float('inf')
+            best_group = None
+            anthropophily_groups = get_anthropophily_groups()
+            for anthropophily, species in anthropophily_groups.items():
+                if anthropophily == 'AMBIVALENT':
+                    continue
+                # make sure that the test species is not in the group
+                species = species - {test_species}
+                # We get the consensus for all the train species in the given anthropophily group
+                consensus = get_consensus_seq(train_orthologs.items(), species)
+                if not consensus:
+                    print('No consensus sequence in group {} for ortholog group {} and test specie {}'.format(anthropophily, ortholog_group, test_species))
+                    continue
+                aligner = PairwiseAligner(scoring='blastp')
+                try:
+                    score = aligner.score(test_ortholog_seq, consensus)
+                except:
+                    print(test_ortholog_seq)
+                    print(consensus)
+                # group_scores[anthropophily].append(score)
+                if score > max_score:
+                    max_score = score
+                    best_group = anthropophily
+                print(ortholog_group['group_id'], anthropophily, test_ortholog, score)
+            if best_group:
+                group_scores[best_group] += 1
+
+        group = sorted(group_scores.items(), key=lambda x: x[1], reverse=True)[0]
+        expected_group = get_expected_species_group(test_species)
+        test_results.append((test_species, expected_group, group[0]))
+        print(pd.DataFrame(ortholog_hist.items(), columns=['ortholog_group_id', 'count']))
+
+    test_results = pd.DataFrame(test_results, columns=['Test Species', 'Expected', 'Predicted'])
+    test_results.to_csv('data/graph_test_results.tsv', index=False, sep='\t')
+    ortholog_hist =  pd.DataFrame(ortholog_hist.items(), columns=['ortholog_group_id', 'count'])
+    ortholog_hist.to_csv('data/graph_ortholog_hist.tsv', index=False, sep='\t')
+    return test_results, ortholog_hist

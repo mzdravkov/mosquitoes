@@ -5,6 +5,7 @@ from analysis import analyse_protein, avg_score_for_phenotypic_groups
 from analysis import moving_window_validation
 from analysis import get_top_proteins_and_validate
 from analysis import top_by_relevance
+from analysis import analyse_graph
 
 from processing import align
 
@@ -30,6 +31,7 @@ parser_align.add_argument("-a", metavar='genome1,genome2,...', dest='additional_
 parser_align.add_argument("-s", dest='sensitivity',
                           help='Alignment sensitivity that will be passed to Diamond', default='sensitive',
                           choices=['faster', 'fast', 'mid-sensitive', 'sensitive', 'more-sensitive', 'very-sensitive', 'ultra-sensitive'])
+parser_align.add_argument('-g', '--genome', help='Use genome analysis instead of proteome', action='store_true')
 
 
 # Create a parser for the "analyse" subcommand
@@ -42,6 +44,14 @@ parser_align.add_argument('-v', '--validate', help='Run analysis on N-1 species 
 parser_align.add_argument('-w', '--window', help='Run validation on a window with size W across the top N proteins', action='store_true')
 parser_align.add_argument('-W', '--window_size', help='Size of the moving window for the validation', type=int, default=5)
 parser_align.add_argument('-s', '--window_step', help='Window step', type=int, default=1)
+parser_align.add_argument('-g', '--genome', help='Use genome analysis instead of proteome', action='store_true')
+
+# Create a parser for the "graph" subcommand
+parser_graph = subparsers.add_parser("graph", help="Analyse the already generated correspendences using a graph-based approach.")
+
+parser_graph.add_argument('ortholog_groups', help='The path to the ortholog groups file')
+parser_graph.add_argument('-t', '--top', help='Find the top N most relevant proteins.', type=int, default=11)
+
 
 parser_check_grouping = subparsers.add_parser("check_grouping", help="Check whether the phenotype grouping depends on the genetic similarity between species.")
 
@@ -63,5 +73,7 @@ if __name__ == '__main__':
                 top_by_relevance(args.top)
     elif args.subcommand == 'check_grouping':
         avg_score_for_phenotypic_groups()
+    elif args.subcommand == 'graph':
+        analyse_graph(args.ortholog_groups, args.top)
     else:
         parser.print_help()

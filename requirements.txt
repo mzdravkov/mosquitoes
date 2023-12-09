@@ -1,8 +1,11 @@
 biopython>=1.80
 wheel>=0.38.2
-ncbi-datasets-pylib>=14.2.2
+ncbi-datasets-pylib>=15.19
 prettytable
 pandas
 networkx
-sklearn
+scikit-learn
 dask
+statsmodels
+seaborn
+swifter
