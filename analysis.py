@@ -926,7 +926,9 @@ def calculate_score_for_ortholog_group(ortho_group):
         anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == 1]
         non_anthropophilic = [gene for gene, species in genes.items() if SPECIES_ANTHROPOPHILY[species] == -1]
         subgraph = graph.subgraph(genes.keys())
-        modularity = nx.community.modularity(subgraph, [anthropophilic, non_anthropophilic], weight='identity')
+        # modularity = nx.community.modularity(subgraph, [anthropophilic, non_anthropophilic], weight='identity')
+        # score = np.mean(nx.community.partition_quality(subgraph, [anthropophilic, non_anthropophilic]))
+        score = nx.community.partition_quality(subgraph, [anthropophilic, non_anthropophilic])[1]
         # anthropophilic_subgraph = graph.subgraph(anthropophilic)
         # non_anthropophilic_subgraph = graph.subgraph(non_anthropophilic)
         # anthropophilic_compactness = compactness(anthropophilic_subgraph)
@@ -949,15 +951,17 @@ def calculate_score_for_ortholog_group(ortho_group):
             # subgraphs_distance = distance(group1_subgraph, group2_subgraph, graph)
             # agg_score = compactness1 * compactness2 / (subgraphs_distance ** 2)
             # random_division_scores.append(agg_score)
-            random_modularity = nx.community.modularity(subgraph, (group1, group2), weight='identity')
-            random_division_scores.append(random_modularity)
+            # random_modularity = nx.community.modularity(subgraph, (group1, group2), weight='identity')
+            # random_score = np.mean(nx.community.partition_quality(subgraph, [group1, group2]))
+            random_score = nx.community.partition_quality(subgraph, [group1, group2])[1]
+            random_division_scores.append(random_score)
 
         mean_rand_division_score = np.average(random_division_scores)
         std = np.std(random_division_scores)
 
         # get how many standard deviations from the mean the anthropophily_division_score is
         # zscore = (anthropophily_division_score - mean_rand_division_score) / std
-        zscore = (modularity - mean_rand_division_score) / std
+        zscore = (score - mean_rand_division_score) / std
         
         return group_id, zscore
     except Exception as e:
